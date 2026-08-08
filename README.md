@@ -1,6 +1,6 @@
 # Arslan Agent Service
 
-Multi-agent FastAPI service (profile + system tools) deployed on Google Cloud Run.
+Multi-agent FastAPI service (profile + system tools) with a web chat UI, deployed on Google Cloud Run.
 
 ## Local
 
@@ -12,10 +12,14 @@ cp .env.example .env   # add OPENAI_API_KEY
 uvicorn app.main:app --reload --port 8080
 ```
 
+Open http://localhost:8080 for the chat UI.
+
 ## Live
 
-- API: https://arslan-agent-service-59038284696.us-central1.run.app/
-- Docs UI: https://arslan-agent-service-59038284696.us-central1.run.app/docs
+- **Chat UI:** https://arslan-agent-service-59038284696.us-central1.run.app/
+- **Repo:** https://github.com/arslanoqads/arslan-agent-service
+- **API docs:** https://arslan-agent-service-59038284696.us-central1.run.app/docs
+- **Health:** https://arslan-agent-service-59038284696.us-central1.run.app/health
 
 ## Deploy flow
 

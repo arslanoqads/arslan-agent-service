@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Arslan Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="bg" aria-hidden="true"></div>
+
+  <header class="top">
+    <div class="brand">
+      <p class="brand-mark">Arslan Agent</p>
+      <p class="brand-sub">Multi-agent portfolio assistant · RAG + tools · Cloud Run</p>
+    </div>
+    <nav class="links">
+      <a class="link" href="https://github.com/arslanoqads/arslan-agent-service" target="_blank" rel="noopener noreferrer">View repo</a>
+      <a class="link ghost" href="/docs" target="_blank" rel="noopener noreferrer">API docs</a>
+    </nav>
+  </header>
+
+  <main class="shell">
+    <section class="intro">
+      <h1>Ask about the profile, or try a system tool.</h1>
+      <p>
+        This live demo routes your message through a supervisor to either a resume/bio RAG agent
+        or a simulated system agent. Built for the accompanying tutorial article.
+      </p>
+      <div class="chips" id="suggestions">
+        <button type="button" data-prompt="What is Arslan known for professionally?">Profile background</button>
+        <button type="button" data-prompt="Evaluate this JD: AI Product Manager with agent systems experience.">JD match</button>
+        <button type="button" data-prompt="What is my current battery status?">Battery status</button>
+      </div>
+    </section>
+
+    <section class="chat" aria-label="Chat">
+      <div class="messages" id="messages"></div>
+
+      <form class="composer" id="chat-form">
+        <label class="sr-only" for="message">Message</label>
+        <textarea
+          id="message"
+          name="message"
+          rows="1"
+          placeholder="Ask something…"
+          required
+        ></textarea>
+        <button type="submit" id="send" aria-label="Send">
+          Send
+        </button>
+      </form>
+      <p class="hint">Session is kept in-memory per <code>thread_id</code> on this browser tab.</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <a href="https://github.com/arslanoqads/arslan-agent-service" target="_blank" rel="noopener noreferrer">
+      github.com/arslanoqads/arslan-agent-service
+    </a>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

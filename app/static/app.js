@@ -20,7 +20,7 @@
 
   addMessage(
     "system",
-    "Try a suggestion below, or ask about background, job fit, or system metrics."
+    "Try a suggestion below. Demo limit: 2 questions per visitor to control budget."
   );
 
   suggestions?.addEventListener("click", (event) => {

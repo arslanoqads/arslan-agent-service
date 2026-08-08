@@ -47,6 +47,8 @@ I indexed my **resume** and **bio** PDFs. Hybrid retrieval (keyword + embeddings
 
 You don’t need a fancy vector database for v1. In-memory is enough to learn the loop.
 
+Those PDFs stay **private**. They are not in the public GitHub repo. Locally they live on my machine under `data/raw/`. In the cloud they live in a **private GCS bucket**, and the app downloads them at startup.
+
 ### Tools
 
 I added a few **dummy tools** around retrieval and profile actions (search background, pretend to email a resume, rough JD match).
@@ -75,7 +77,7 @@ User message → Supervisor → Profile agent (RAG/tools)
 
 ## Step 2 — Dummy what won’t work in the cloud
 
-On a Mac, system metrics are real. On **Cloud Run**, there is no laptop battery.
+On a Mac, system metrics can be real. On **Cloud Run**, there is no laptop battery.
 
 So for GCP I **dummied those tool results**—random simulated RAM/battery/file paths. Same tool names, cloud-safe behavior.
 
@@ -87,14 +89,12 @@ Secrets stay out of Git. Locally use `.env`. In GCP, put `OPENAI_API_KEY` in Sec
 
 ## Step 3 — Set up Git like a small team in prod
 
-Even solo, use the same shape teams use:
+Even solo, use the same shape teams use in production.
 
-| Branch | Job |
-|--------|-----|
-| `develop` | Where you integrate work |
-| `main` | Production (triggers deploy) |
+**`develop`** is where you integrate work.  
+**`main`** is production—and merging to it triggers deploy.
 
-Optional feature branches later. For this project, working on `develop` and PR’ing into `main` is enough.
+Optional feature branches can come later. For this project, working on `develop` and opening a pull request into `main` is enough.
 
 Why bother? Because **CI/CD teaches the production habit**:
 
@@ -116,16 +116,17 @@ edit locally → commit → push develop → pull request into main → merge
 
 Use a Google Cloud trial project. You need roughly:
 
-1. **A GCP project** (billing/trial credits are fine for demos)  
+1. A **GCP project** (billing/trial credits are fine for demos)  
 2. **Secret Manager** for the OpenAI key  
-3. **Artifact Registry** for Docker images  
-4. **Cloud Run** to run the container  
-5. A **service account** GitHub Actions can impersonate  
-6. **Workload Identity Federation** so GitHub talks to GCP without downloading a long-lived JSON key  
+3. A **private Cloud Storage bucket** for resume/bio PDFs  
+4. **Artifact Registry** for Docker images  
+5. **Cloud Run** to run the container  
+6. A **service account** GitHub Actions can impersonate  
+7. **Workload Identity Federation** so GitHub talks to GCP without downloading a long-lived JSON key  
 
 You’re not managing a VM. Cloud Run is the “instance”: it runs your container, scales, and gives you a HTTPS URL.
 
-Dockerfile stays minimal—install deps, copy app + PDFs, start uvicorn on `$PORT`.
+The Dockerfile stays minimal—install deps, copy the app, start uvicorn on `$PORT`. Documents come from the private bucket at runtime, not from the public repo.
 
 ---
 
@@ -133,17 +134,18 @@ Dockerfile stays minimal—install deps, copy app + PDFs, start uvicorn on `$POR
 
 This is the part tutorials skip.
 
-1. **Local machine** holds the code and `.env`  
-2. **GitHub** holds the repo, PRs, Actions, and (only) GCP auth secrets  
-3. **GCP** holds the runtime secret, image registry, and Cloud Run service  
+**Your laptop** holds the code, local `.env`, and local PDFs.  
+**GitHub** holds the repo, PRs, Actions, and GCP auth secrets (project ID, region, service account, WIF provider, bucket name).  
+**GCP** holds the OpenAI secret, private PDF bucket, image registry, and Cloud Run service.
 
 Wire them once:
 
-- `git remote` → your GitHub repo  
-- GitHub Actions secrets → project ID, region, service account, WIF provider  
-- Cloud Run → reads `OPENAI_API_KEY` from Secret Manager at deploy time  
+- Point `git remote` at your GitHub repo  
+- Add the GitHub Actions secrets for GCP auth + `RAG_GCS_BUCKET`  
+- Give the Cloud Run runtime service account permission to read the PDF bucket  
+- Deploy Cloud Run so it reads `OPENAI_API_KEY` from Secret Manager  
 
-After that, your laptop never needs to talk to Cloud Run directly for deploys. Git is the control plane.
+After that, your laptop never needs to talk to Cloud Run directly for deploys. **Git is the control plane.**
 
 ---
 
@@ -153,7 +155,7 @@ After that, your laptop never needs to talk to Cloud Run directly for deploys. G
 git push origin develop
 ```
 
-Open a **pull request** `develop` → `main`. CI can lint/build. When you merge:
+Open a **pull request** from `develop` into `main`. CI can lint/build. When you merge:
 
 1. CD builds the Docker image  
 2. Pushes it to Artifact Registry  
@@ -161,7 +163,7 @@ Open a **pull request** `develop` → `main`. CI can lint/build. When you merge:
 
 Refresh the public URL. That’s the whole loop.
 
-Chat UI for humans. `/docs` if you want the raw API. Repo link in the UI so readers can inspect how it’s wired.
+The chat UI is for humans. `/docs` is there if you want the raw API. The UI also links to the repo so readers can inspect how it’s wired.
 
 ---
 
@@ -171,7 +173,7 @@ Chat UI for humans. `/docs` if you want the raw API. Repo link in the UI so read
 
 **Isn’t:** a secure, multi-tenant, guarded agent platform. No rate limits, no prompt firewall, stubbed email/JD tools, simulated system metrics in the cloud.
 
-Improvise from here: real email, GCS for PDFs, auth, better memory, stricter routing. Those are 1→N problems.
+Improvise from here: real email, auth, better memory, stricter routing, scrubbing old secrets from git history. Those are 1→N problems.
 
 Getting something live that updates on merge is the N=1 problem. This gets you there.
 
@@ -180,11 +182,12 @@ Getting something live that updates on merge is the N=1 problem. This gets you t
 ## Recap
 
 1. Build a basic agent locally (RAG + tools + chat)  
-2. Dummy cloud-hostile tools  
-3. Use Git branches/PRs like a tiny prod team  
-4. Stand up a trial GCP project (secrets, registry, Cloud Run)  
-5. Connect GitHub ↔ GCP with WIF  
-6. Push → PR → merge → image deploys  
+2. Keep PDFs and API keys out of the public repo  
+3. Dummy cloud-hostile tools  
+4. Use Git branches and pull requests like a tiny prod team  
+5. Stand up a trial GCP project (secrets, private bucket, registry, Cloud Run)  
+6. Connect GitHub ↔ GCP with Workload Identity  
+7. Push → PR → merge → image deploys  
 
 Clone the repo, ask your coding agent for the file-level details, and run the same path on your own docs.
 

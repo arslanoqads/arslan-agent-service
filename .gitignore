@@ -14,7 +14,6 @@ __pycache__/
 # System Files
 .DS_Store
 
-# Raw data: keep structure + ship PDFs for RAG (needed by Docker/Cloud Run)
+# Raw data: keep folder in git, keep PDFs private (local-only / GCS)
 data/raw/*
 !data/raw/.gitkeep
-!data/raw/*.pdf

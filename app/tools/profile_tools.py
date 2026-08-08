@@ -1,12 +1,9 @@
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
+from app.rag.documents import ensure_rag_pdfs
 from app.rag.hybrid_engine import HybridRAGEngine
 
-# Load both PDF files into the Hybrid Engine at startup
-rag_engine = HybridRAGEngine([
-    "data/raw/resume.pdf",
-    "data/raw/bio.pdf"
-])
+rag_engine = HybridRAGEngine(ensure_rag_pdfs())
 
 
 # --- TOOL 1: Hybrid RAG Background Query ---

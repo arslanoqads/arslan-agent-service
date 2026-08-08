@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [develop]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Syntax check
+        run: python -m compileall -q app
+
+      - name: Import cloud-safe tools
+        run: |
+          python - <<'PY'
+          from app.tools.system_tools import get_ram_usage, get_battery_status
+          assert "[SIMULATED]" in get_ram_usage.invoke({})
+          assert "[SIMULATED]" in get_battery_status.invoke({})
+          print("system_tools OK")
+          PY
+
+      - name: Docker build
+        run: docker build -t arslan-agent-service:ci .

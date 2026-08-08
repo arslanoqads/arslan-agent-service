@@ -1,7 +1,20 @@
+# Virtual Environment
 venv/
+.venv/
+
+# Environment Variables & Secrets
 .env
+
+# Python Cache & Artifacts
 __pycache__/
 *.pyc
+.pytest_cache/
+*.egg-info/
+
+# System Files
 .DS_Store
+
+# Raw data: keep structure + ship PDFs for RAG (needed by Docker/Cloud Run)
 data/raw/*
 !data/raw/.gitkeep
+!data/raw/*.pdf

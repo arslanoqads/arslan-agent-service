@@ -1,343 +1,191 @@
-# From Laptop to Cloud Run: Building a Multi-Agent Chatbot with RAG, Tools, and Git-Based Deploy
+# From Zero to a Live Agent on Cloud Run
 
-*A practical, high-level walkthrough of building a FastAPI + LangGraph agent that answers from your resume, calls tools, and ships to Google Cloud Run every time you merge to `main`.*
-
----
-
-Most “AI chatbot” tutorials stop at a notebook. This one goes further: you’ll build a small **multi-agent** service with **hybrid RAG** and **tools**, wrap it in **FastAPI**, then deploy it to **Cloud Run** using **GitHub Actions**—so a merge to `main` becomes a live URL.
-
-This is the architecture behind a real portfolio agent: ask about someone’s background, simulate system diagnostics, keep a conversation thread, and ship updates without SSHing into a server.
+*Lots of tutorials teach you how to build agents. Almost none walk you through deploying one end to end. This post is about that missing middle—getting from a working local demo to a real URL, with Git and GCP in the loop.*
 
 ---
 
-## What you’ll build
+I’m not going to paste the entire codebase here. You don’t need that. If you want the details, clone the repo and let your coding agent fill in the gaps.
 
-A single HTTP service with two capabilities:
+What I *am* showing is the **sequence of steps** that gets you from zero to one: a basic agent running locally, then a team-style Git flow, then a trial GCP deploy that updates when you merge a pull request.
 
-1. **Profile agent** — answers questions from resume/bio PDFs (RAG), can “send resume” and score a job description.
-2. **System agent** — handles OS-style questions (RAM, battery, temp files). In the cloud these return **simulated** results (Cloud Run isn’t your MacBook).
+**Try it:** [live chat UI](https://arslan-agent-service-59038284696.us-central1.run.app/)  
+**Read the code:** [github.com/arslanoqads/arslan-agent-service](https://github.com/arslanoqads/arslan-agent-service)
 
-A **supervisor** routes each user message to the right agent—or to a light general responder for greetings.
+This agent is **basic on purpose**. No serious guardrails, no auth, no production hardening. It simply works well enough to prove the path.
+
+---
+
+## The point
+
+Building the agent is the fun part. Shipping it is where people stall:
+
+- Where do secrets live?
+- How does a teammate get the same code?
+- How does “merge” become “new version in the cloud”?
+
+This project answers those with a boring, copyable path:
 
 ```text
-User → FastAPI /chat
-         ↓
-      Supervisor
-      /    |    \
-Profile  System  General
-  ↕         ↕
- Tools     Tools
+local agent → GitHub (develop / main) → GitHub Actions → Cloud Run
 ```
 
-Live shape of the product:
-
-- `GET /` → **chat UI** (for article readers / demos)  
-- `POST /chat` → `{ "message": "...", "thread_id": "..." }`  
-- `GET /health` → health JSON  
-- Bonus: FastAPI’s `/docs` for raw API tryouts  
-- Repo link in the UI header: [github.com/arslanoqads/arslan-agent-service](https://github.com/arslanoqads/arslan-agent-service)
+Once you’ve done that once, improvising is easy. **Zero to one is the hard step.**
 
 ---
 
-## Project shape (keep it boring)
+## Step 1 — Set up the agent locally
 
-```text
-app/
-  main.py              # FastAPI gateway
-  config/settings.py   # load .env, require OPENAI_API_KEY
-  agent/graph.py       # LangGraph: supervisor + agents
-  rag/hybrid_engine.py # BM25 + embeddings RAG
-  tools/
-    profile_tools.py
-    system_tools.py
-data/raw/              # resume.pdf, bio.pdf
-Dockerfile
-.github/workflows/
-  ci.yml
-  cd.yml
-```
+Think of the product as three pieces glued together:
 
-Two ideas matter more than folder names:
+1. **RAG** — answers grounded in documents  
+2. **Tools** — actions the model can call  
+3. **Chatbot** — FastAPI + a simple UI in front  
 
-1. **Secrets never go in Git** (`.env` is gitignored; production uses Secret Manager).
-2. **`main` is production**; you work on `develop`, then PR into `main`.
+### RAG
 
----
+I indexed my **resume** and **bio** PDFs. Hybrid retrieval (keyword + embeddings) pulls relevant chunks when the profile agent needs them.
 
-## Part 1 — Hybrid RAG (answers grounded in PDFs)
+You don’t need a fancy vector database for v1. In-memory is enough to learn the loop.
 
-RAG = retrieve relevant chunks from your documents, then let the model answer with that context.
+### Tools
 
-**Hybrid** means you combine:
+I added a few **dummy tools** around retrieval and profile actions (search background, pretend to email a resume, rough JD match).
 
-- **Dense search** — OpenAI embeddings + vector similarity (good for meaning: “AI product leadership”)
-- **Sparse search** — BM25 keywords (good for exact terms: company names, titles)
+I also added **system tools**—battery status, RAM, temp files. They’re irrelevant to a portfolio bot. That’s fine. The point was to show a second agent with a different toolset, not to monitor laptops in production.
 
-Then blend them with an ensemble retriever:
+### Chatbot
 
-```python
-# Conceptual core of HybridRAGEngine
-splits = text_splitter.split_documents(pdf_docs)
-
-dense = InMemoryVectorStore.from_documents(
-    splits, embedding=OpenAIEmbeddings()
-).as_retriever(search_kwargs={"k": 3})
-
-bm25 = BM25Retriever.from_documents(splits)
-bm25.k = 3
-
-retriever = EnsembleRetriever(
-    retrievers=[bm25, dense],
-    weights=[0.5, 0.5],
-)
-```
-
-Expose that as a **tool** the profile agent can call:
-
-```python
-@tool("query_arslan_profile")
-def query_arslan_profile(query: str) -> str:
-    """Search resume + bio with hybrid RAG."""
-    return rag_engine.query(query)
-```
-
-**Why a tool, not “stuff the whole PDF into the prompt”?**  
-Tools keep retrieval optional and on-demand. The model decides when it needs documents. That scales better as docs grow.
-
----
-
-## Part 2 — Tools (actions, not just text)
-
-Besides RAG, the profile agent can have lightweight actions:
-
-- `send_resume_email` — simulate dispatch (swap for SendGrid later)
-- `evaluate_jd_match` — structured “fit” response for a job description
-
-The system agent exposes diagnostics. On a laptop you might use `psutil`; **on Cloud Run, simulate**:
-
-```python
-@tool("get_ram_usage")
-def get_ram_usage() -> str:
-    percent = round(random.uniform(35.0, 82.0), 1)
-    return f"[SIMULATED] RAM Usage: {percent}% used ..."
-```
-
-That’s an underrated production lesson: **design tools for the environment they’ll run in.**
-
----
-
-## Part 3 — LangGraph: supervisor + sub-agents
-
-LangGraph is a state machine for agents. Shared state is mostly the message list:
-
-```python
-class State(TypedDict):
-    messages: Annotated[list, add_messages]
-    next_node: str
-```
-
-Each specialist is a node: call an LLM with tools bound, return a new message. A `ToolNode` executes tool calls; `tools_condition` loops until the model stops calling tools.
-
-The supervisor only **routes**:
-
-```python
-# Route to profile_agent | system_agent | general_responder
-decision = supervisor_llm.invoke([supervisor_prompt] + state["messages"])
-return {"next_node": decision.next_destination}
-```
-
-Wire the graph:
-
-```python
-builder = StateGraph(State)
-builder.add_edge(START, "supervisor")
-builder.add_conditional_edges("supervisor", supervisor_router, {...})
-builder.add_conditional_edges("profile_agent", tools_condition, {...})
-builder.add_edge("profile_tools", "profile_agent")
-# same pattern for system_agent ...
-```
-
-**Greeting trap:** if “FINISH” goes straight to `END`, `/chat` may echo the user message. Prefer a small `general_responder` node that actually writes a reply.
-
----
-
-## Part 4 — FastAPI gateway + session memory
-
-Keep the HTTP layer thin. Load secrets first, compile the graph with a checkpointer, invoke with a `thread_id`:
-
-```python
-import app.config.settings  # load_dotenv + validate OPENAI_API_KEY
-from app.agent.graph import builder
-
-memory = MemorySaver()
-agent_graph = builder.compile(checkpointer=memory)
-
-@app.post("/chat")
-async def chat_endpoint(query: ChatQuery):
-    config = {"configurable": {"thread_id": query.thread_id}}
-    result = agent_graph.invoke(
-        {"messages": [HumanMessage(content=query.message)]},
-        config=config,
-    )
-    return {"response": result["messages"][-1].content, "thread_id": query.thread_id}
-```
-
-Local run:
+A thin API (`POST /chat`) and a small web UI at `/`. Locally:
 
 ```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8080
 ```
 
-Try `http://localhost:8080` for the chat UI, or `/docs` for the raw API explorer.
+Open localhost, ask a question, confirm the graph routes and tools fire. That’s your baseline.
 
-Serve the UI from FastAPI so one Cloud Run service hosts both page and API:
-
-```python
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-@app.get("/")
-def chat_ui():
-    return FileResponse(STATIC_DIR / "index.html")
-```
-
-The page posts to `/chat` and links out to the GitHub repo so readers can use the bot and inspect the code.
-
----
-
-## Part 5 — Containerize for Cloud Run
-
-Cloud Run runs a container and injects `PORT`. A minimal Dockerfile:
-
-```dockerfile
-FROM python:3.12-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY app ./app
-COPY data/raw ./data/raw
-CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
-```
-
-Ship PDFs in the image for v1 (or later pull from GCS). Keep `.env` out of the image; pass `OPENAI_API_KEY` at runtime from Secret Manager.
-
----
-
-## Part 6 — Git branches (the human workflow)
-
-Think in three lanes:
-
-| Branch | Role |
-|--------|------|
-| `main` | Production (triggers deploy) |
-| `develop` | Integration draft |
-| `feat/...` | Optional one-feature side path |
-
-Solo flow that works:
-
-1. Edit on `develop`  
-2. Commit + push  
-3. Open PR → `main`  
-4. Merge when CI is green  
-5. CD deploys  
-
-Protect `main` so you can’t push production by accident: require PRs + status checks.
-
----
-
-## Part 7 — GCP once, then forget the servers
-
-One-time cloud setup (high level):
-
-1. **GCP project** + enable Cloud Run, Artifact Registry, Secret Manager, IAM APIs  
-2. **Secret Manager** secret: `OPENAI_API_KEY`  
-3. **Artifact Registry** Docker repo (e.g. `arslan-agent` in `us-central1`)  
-4. **Service account** for GitHub Actions (`github-runner`) with rights to push images and deploy Cloud Run  
-5. **Workload Identity Federation** so GitHub can impersonate that SA **without** a downloaded JSON key  
-6. Grant the Cloud Run runtime SA **Secret Accessor** on `OPENAI_API_KEY`
-
-In GitHub → Settings → Secrets, store only GCP auth values:
-
-- `GCP_PROJECT_ID`  
-- `GCP_REGION`  
-- `GCP_SERVICE_ACCOUNT`  
-- `GCP_WORKLOAD_IDENTITY_PROVIDER`  
-
-Do **not** duplicate the OpenAI key in GitHub if Cloud Run reads Secret Manager.
-
----
-
-## Part 8 — CI/CD: merge to `main` = new revision
-
-**CI** (on PRs / `develop`): install deps, `compileall`, smoke-import cloud-safe tools, `docker build`.
-
-**CD** (on push to `main`):
-
-```yaml
-# Conceptual CD steps
-- uses: google-github-actions/auth@v2   # Workload Identity
-- gcloud auth configure-docker ...
-- docker build && docker push
-- uses: google-github-actions/deploy-cloudrun@v2
-  with:
-    image: ...
-    flags: >-
-      --allow-unauthenticated
-      --set-secrets=OPENAI_API_KEY=OPENAI_API_KEY:latest
-```
-
-After a green CD run you get a URL like:
-
-`https://YOUR-SERVICE-xxxxx.us-central1.run.app/`
-
-Open that URL for the chat UI (with a **View repo** button). Or call the API:
-
-```bash
-curl -X POST https://YOUR-SERVICE/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"What is Arslan known for?","thread_id":"demo1"}'
-```
-
----
-
-## Day-2 loop (what you do forever after)
+A supervisor sits on top and routes to a profile agent or a system agent. High level, not magic:
 
 ```text
-change code → commit → push develop → PR to main → merge → wait for CD → test /docs
+User message → Supervisor → Profile agent (RAG/tools)
+                          → System agent (system tools)
+                          → General reply
 ```
 
-No SSH. No “remember the deploy command.” The pipeline *is* the deploy command.
+---
+
+## Step 2 — Dummy what won’t work in the cloud
+
+On a Mac, system metrics are real. On **Cloud Run**, there is no laptop battery.
+
+So for GCP I **dummied those tool results**—random simulated RAM/battery/file paths. Same tool names, cloud-safe behavior.
+
+That’s a useful habit: design tools for the environment they’ll run in. Don’t discover it after deploy.
+
+Secrets stay out of Git. Locally use `.env`. In GCP, put `OPENAI_API_KEY` in Secret Manager and inject it into Cloud Run.
 
 ---
 
-## What this teaches (beyond the demo)
+## Step 3 — Set up Git like a small team in prod
 
-1. **Agents are graphs**, not one giant prompt.  
-2. **RAG belongs behind a tool** when the model should choose when to retrieve.  
-3. **Environment-aware tools** (real locally, simulated in Cloud Run) prevent silent production failures.  
-4. **FastAPI is the door**; LangGraph is the brain.  
-5. **Git + WIF + Cloud Run** is enough to run a serious demo without babysitting VMs.  
-6. **Secrets and PDFs** need an explicit plan (Secret Manager + image/GCS)—Git alone isn’t enough.
+Even solo, use the same shape teams use:
 
----
+| Branch | Job |
+|--------|-----|
+| `develop` | Where you integrate work |
+| `main` | Production (triggers deploy) |
 
-## Stretch goals
+Optional feature branches later. For this project, working on `develop` and PR’ing into `main` is enough.
 
-- Real email via SendGrid/Postmark  
-- Persist checkpointer state (Redis / Postgres) instead of in-memory  
-- Move PDFs to GCS and load at startup  
-- Add a tiny chat UI in front of `/chat`  
-- Feature branches when you and a teammate ship B and C in parallel  
+Why bother? Because **CI/CD teaches the production habit**:
 
----
+- You don’t SSH into a box to “update the bot”
+- You push code, open a pull request, merge when checks look good
+- The pipeline builds a Docker image and deploys it
 
-## Closing
+Protect `main` so it only updates through PRs. That’s how prod teams avoid “I fixed it live and forgot to commit.”
 
-You don’t need a platform team to ship an agent. You need a clear graph, grounded retrieval, honest tool design, a thin API, and a boring path from `git push` to Cloud Run.
+Day-to-day:
 
-Build it once. Protect `main`. Merge with confidence. Then iterate in public—one green CD at a time.
+```text
+edit locally → commit → push develop → pull request into main → merge
+```
 
 ---
 
-*If you build your own version, start with one agent + one RAG tool + `/chat`, then add the supervisor. Complexity is easier to add than to debug.*
+## Step 4 — Set up GCP on a trial account
+
+Use a Google Cloud trial project. You need roughly:
+
+1. **A GCP project** (billing/trial credits are fine for demos)  
+2. **Secret Manager** for the OpenAI key  
+3. **Artifact Registry** for Docker images  
+4. **Cloud Run** to run the container  
+5. A **service account** GitHub Actions can impersonate  
+6. **Workload Identity Federation** so GitHub talks to GCP without downloading a long-lived JSON key  
+
+You’re not managing a VM. Cloud Run is the “instance”: it runs your container, scales, and gives you a HTTPS URL.
+
+Dockerfile stays minimal—install deps, copy app + PDFs, start uvicorn on `$PORT`.
+
+---
+
+## Step 5 — Connect local → Git → GCP
+
+This is the part tutorials skip.
+
+1. **Local machine** holds the code and `.env`  
+2. **GitHub** holds the repo, PRs, Actions, and (only) GCP auth secrets  
+3. **GCP** holds the runtime secret, image registry, and Cloud Run service  
+
+Wire them once:
+
+- `git remote` → your GitHub repo  
+- GitHub Actions secrets → project ID, region, service account, WIF provider  
+- Cloud Run → reads `OPENAI_API_KEY` from Secret Manager at deploy time  
+
+After that, your laptop never needs to talk to Cloud Run directly for deploys. Git is the control plane.
+
+---
+
+## Step 6 — Push, PR, deploy
+
+```text
+git push origin develop
+```
+
+Open a **pull request** `develop` → `main`. CI can lint/build. When you merge:
+
+1. CD builds the Docker image  
+2. Pushes it to Artifact Registry  
+3. Deploys a new Cloud Run revision  
+
+Refresh the public URL. That’s the whole loop.
+
+Chat UI for humans. `/docs` if you want the raw API. Repo link in the UI so readers can inspect how it’s wired.
+
+---
+
+## What this is—and isn’t
+
+**Is:** a complete 0→1 path for RAG + tools + chatbot + Git CI/CD + Cloud Run.
+
+**Isn’t:** a secure, multi-tenant, guarded agent platform. No rate limits, no prompt firewall, stubbed email/JD tools, simulated system metrics in the cloud.
+
+Improvise from here: real email, GCS for PDFs, auth, better memory, stricter routing. Those are 1→N problems.
+
+Getting something live that updates on merge is the N=1 problem. This gets you there.
+
+---
+
+## Recap
+
+1. Build a basic agent locally (RAG + tools + chat)  
+2. Dummy cloud-hostile tools  
+3. Use Git branches/PRs like a tiny prod team  
+4. Stand up a trial GCP project (secrets, registry, Cloud Run)  
+5. Connect GitHub ↔ GCP with WIF  
+6. Push → PR → merge → image deploys  
+
+Clone the repo, ask your coding agent for the file-level details, and run the same path on your own docs.
+
+Zero to one. Then make it yours.

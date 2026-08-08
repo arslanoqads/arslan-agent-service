@@ -10,3 +10,4 @@ python-dotenv>=1.0.1
 pydantic>=2.6.0
 pypdf>=4.1.0
 rank_bm25>=0.2.2
+google-cloud-storage>=2.14.0

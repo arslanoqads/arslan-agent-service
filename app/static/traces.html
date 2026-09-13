@@ -74,6 +74,7 @@
           <h3 class="obs-subtitle">RAG golden cases <span class="info-tip" tabindex="0" data-tip="Labeled prompts for each triad edge. Scores come from matching demo/production traces to these cases." aria-label="Why track this">i</span></h3>
           <p id="rag-diagnosis" class="hint">—</p>
           <div class="pattern-list" id="rag-patterns"></div>
+          <button id="rag-more" class="page-more" type="button" hidden>View next 5</button>
         </div>
         <div>
           <h3 class="obs-subtitle">If a score is low → try these fixes <span class="info-tip" tabindex="0" data-tip="Engineering mitigations for each weak triad edge. This is a how-to guide, not a score. Active = already shipped in this agent." aria-label="Why track this">i</span></h3>
@@ -148,12 +149,15 @@
     const goldenMetricsNoteEl = document.getElementById("golden-metrics-note");
     const tracesMoreBtn = document.getElementById("traces-more");
     const goldenMoreBtn = document.getElementById("golden-more");
+    const ragMoreBtn = document.getElementById("rag-more");
     const traceListMetaEl = document.getElementById("trace-list-meta");
     const PAGE_SIZE = 5;
     let allMyTraces = [];
     let allGoldenCases = [];
+    let allRagCases = [];
     let tracesVisible = PAGE_SIZE;
     let goldenVisible = PAGE_SIZE;
+    let ragVisible = PAGE_SIZE;
     const charts = {};
     const kpiTips = {
       "Sessions": "Unique conversation threads. The denominator for per-session cost, tools, and health.",
@@ -459,33 +463,9 @@
         ? `Current pattern ${diagnosis.code}: ${diagnosis.label || "—"} · ${triad.cases_scored || 0}/${triad.cases_total || 0} RAG golden cases scored`
         : `${triad.cases_scored || 0}/${triad.cases_total || 0} RAG golden cases scored`;
 
-      ragPatternsEl.replaceChildren();
-      (triad.cases || []).forEach((row) => {
-        const item = document.createElement("button");
-        item.type = "button";
-        item.className = "pattern-row";
-        const head = document.createElement("div");
-        head.className = "row-head";
-        const score = row.score;
-        head.append(
-          badge((row.focus || "").replaceAll("_", " "), "neutral"),
-          badge(row.family || "?", row.family === "POS" ? "ok" : row.family === "NEG" ? "fail" : "warn")
-        );
-        if (score == null) head.append(badge("unscored", "warn"));
-        else head.append(badge(`${Math.round(score * 100)}%`, score >= 0.7 ? "ok" : score >= 0.45 ? "warn" : "fail"));
-        const body = document.createElement("div");
-        body.className = "row-body";
-        body.textContent = `${row.case_id} · ${(row.input || "").slice(0, 90)}`;
-        const notes = document.createElement("div");
-        notes.className = "row-notes";
-        notes.textContent = row.notes || "";
-        item.append(head, body);
-        if (row.notes) item.append(notes);
-        item.addEventListener("click", () => {
-          detailEl.textContent = JSON.stringify(row, null, 2);
-        });
-        ragPatternsEl.appendChild(item);
-      });
+      allRagCases = triad.cases || [];
+      ragVisible = PAGE_SIZE;
+      renderRagPage();
 
       ragPlaybookEl.replaceChildren();
       const byDim = {};
@@ -515,6 +495,41 @@
       });
     }
 
+    function renderRagCaseRow(row) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "pattern-row";
+      const head = document.createElement("div");
+      head.className = "row-head";
+      const score = row.score;
+      head.append(
+        badge((row.focus || "").replaceAll("_", " "), "neutral"),
+        badge(row.family || "?", row.family === "POS" ? "ok" : row.family === "NEG" ? "fail" : "warn")
+      );
+      if (score == null) head.append(badge("unscored", "warn"));
+      else head.append(badge(`${Math.round(score * 100)}%`, score >= 0.7 ? "ok" : score >= 0.45 ? "warn" : "fail"));
+      const body = document.createElement("div");
+      body.className = "row-body";
+      body.textContent = `${row.case_id} · ${(row.input || "").slice(0, 90)}`;
+      const notes = document.createElement("div");
+      notes.className = "row-notes";
+      notes.textContent = row.notes || "";
+      item.append(head, body);
+      if (row.notes) item.append(notes);
+      item.addEventListener("click", () => {
+        detailEl.textContent = JSON.stringify(row, null, 2);
+      });
+      return item;
+    }
+
+    function renderRagPage() {
+      renderPaged(allRagCases, ragVisible, ragPatternsEl, renderRagCaseRow, ragMoreBtn, ragDiagnosisEl, "rag");
+      const scored = allRagCases.filter((row) => row.score != null).length;
+      if (allRagCases.length) {
+        ragDiagnosisEl.textContent = `Showing ${Math.min(ragVisible, allRagCases.length)} of ${allRagCases.length} RAG golden cases · ${scored} scored`;
+      }
+    }
+
     function renderPaged(items, visible, container, rowFn, moreBtn, metaEl, label) {
       const shown = items.slice(0, visible);
       container.replaceChildren();
@@ -523,7 +538,9 @@
         empty.className = "hint";
         empty.textContent = label === "traces"
           ? "No traces from this IP yet. Chat from this network, then refresh."
-          : "No golden cases.";
+          : label === "rag"
+            ? "No RAG golden cases."
+            : "No golden cases.";
         container.appendChild(empty);
       } else {
         shown.forEach((item) => container.appendChild(rowFn(item)));
@@ -693,6 +710,10 @@
     goldenMoreBtn.addEventListener("click", () => {
       goldenVisible += PAGE_SIZE;
       renderGoldenPage();
+    });
+    ragMoreBtn.addEventListener("click", () => {
+      ragVisible += PAGE_SIZE;
+      renderRagPage();
     });
 
     document.getElementById("load").addEventListener("click", load);

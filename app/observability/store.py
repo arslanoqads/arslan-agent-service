@@ -54,19 +54,35 @@ class FirestoreTraceStore:
         self.collection = self.client.collection("agent_traces")
 
     def save(self, trace: dict) -> None:
-        self.collection.document(trace["id"]).set(trace)
+        payload = dict(trace)
+        for key in ("started_at", "ended_at"):
+            value = payload.get(key)
+            if value is not None and not isinstance(value, str) and hasattr(value, "isoformat"):
+                payload[key] = value.isoformat()
+        for span in payload.get("spans") or []:
+            for key in ("started_at", "ended_at"):
+                value = span.get(key)
+                if value is not None and not isinstance(value, str) and hasattr(value, "isoformat"):
+                    span[key] = value.isoformat()
+        self.collection.document(trace["id"]).set(payload)
 
     def get(self, trace_id: str) -> dict | None:
         snap = self.collection.document(trace_id).get()
         return snap.to_dict() if snap.exists else None
 
     def list_traces(self, limit: int = 50) -> list[dict]:
-        docs = (
-            self.collection.order_by("started_at", direction="DESCENDING")
-            .limit(limit)
-            .stream()
-        )
-        return [doc.to_dict() for doc in docs]
+        try:
+            docs = list(self.collection.limit(max(limit, 100)).stream())
+        except Exception:
+            return []
+        items = []
+        for doc in docs:
+            data = doc.to_dict() or {}
+            if not data.get("id"):
+                data["id"] = doc.id
+            items.append(data)
+        items.sort(key=lambda item: item.get("started_at") or "", reverse=True)
+        return items[:limit]
 
 
 def get_store():

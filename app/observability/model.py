@@ -25,6 +25,19 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _as_text(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            return str(value)
+    return str(value)
+
+
 def new_trace(thread_id: str, question: str) -> dict:
     return {
         "id": str(uuid.uuid4()),
@@ -145,10 +158,10 @@ def public_span(span: dict) -> dict:
 def public_trace(trace: dict) -> dict:
     """Sanitized trace for public chat and the public observability dashboard."""
     return {
-        "id": trace["id"],
-        "started_at": trace.get("started_at"),
-        "ended_at": trace.get("ended_at"),
-        "status": trace["status"],
+        "id": trace.get("id") or str(uuid.uuid4()),
+        "started_at": _as_text(trace.get("started_at")),
+        "ended_at": _as_text(trace.get("ended_at")),
+        "status": trace.get("status") or "unknown",
         "question": public_question(trace.get("question") or ""),
         "loop_count": trace.get("loop_count", 0),
         "attempt": trace.get("attempt", 0),
@@ -162,7 +175,7 @@ def public_trace(trace: dict) -> dict:
         "stop_reason": trace.get("stop_reason"),
         "error_kind": trace.get("error_kind"),
         "cost_usd": trace.get("cost_usd") or 0.0,
-        "tools": [redact(name) for name in trace.get("tools", [])],
+        "tools": [redact(name) for name in trace.get("tools", []) or []],
         "tool_status": [
             {"name": redact(item.get("name") or ""), "status": item.get("status")}
             for item in trace.get("tool_status") or []
@@ -178,5 +191,5 @@ def public_trace(trace: dict) -> dict:
             "kind": trace["cache"].get("kind"),
             "similarity": trace["cache"].get("similarity"),
         },
-        "spans": [public_span(span) for span in trace.get("spans", [])],
+        "spans": [public_span(span) for span in trace.get("spans", []) or []],
     }

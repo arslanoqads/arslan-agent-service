@@ -25,18 +25,21 @@
 
   <main class="shell">
     <section class="intro">
-      <h1>Ask about the profile, or try a system tool.</h1>
+      <h1>Ask about the resume, or take an action.</h1>
       <p>
-        This live demo routes your message through a supervisor to either a resume/bio RAG agent
-        or a simulated system agent. Built for the accompanying tutorial article.
+        The assistant can answer from the resume, email it, book a 30-minute intro call,
+        compare a job description, or share public links. This turn's trace stays on the page.
       </p>
       <div class="chips" id="suggestions">
         <button type="button" data-prompt="What is Arslan known for professionally?">Profile background</button>
-        <button type="button" data-prompt="Evaluate this JD: AI Product Manager with agent systems experience.">JD match</button>
-        <button type="button" data-prompt="What is my current battery status?">Battery status</button>
+        <button type="button" data-prompt="Email the resume to me@example.com">Email resume</button>
+        <button type="button" data-prompt="Book a 30-minute intro call next Tuesday at 10:00 ET. My email is me@example.com">Book a call</button>
+        <button type="button" data-prompt="Compare this role to the resume: AI product manager who has shipped agent systems.">JD evidence</button>
+        <button type="button" data-prompt="What are your public links?">Public links</button>
       </div>
     </section>
 
+    <section class="workspace">
     <section class="chat" aria-label="Chat">
       <div class="messages" id="messages"></div>
 
@@ -54,6 +57,19 @@
         </button>
       </form>
       <p class="hint">Demo limit: 2 questions per IP to control budget. Session uses an in-memory <code>thread_id</code>.</p>
+    </section>
+    <aside class="trace-panel" aria-live="polite">
+      <div class="trace-head">
+        <h2>Debug</h2>
+        <p id="trace-summary">This question only. Context fill, tools, and the trace as it runs.</p>
+      </div>
+      <div class="budget">
+        <div class="budget-bar" id="budget-bar" aria-hidden="true"></div>
+        <p class="budget-legend" id="budget-legend">Context space is empty.</p>
+      </div>
+      <ol class="trace-steps" id="trace-steps"></ol>
+      <p class="tool-line" id="tool-status"></p>
+    </aside>
     </section>
   </main>
 

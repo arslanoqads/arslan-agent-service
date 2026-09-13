@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from threading import Lock
 
-from app.observability.rag_triad import aggregate_triad
+from app.observability.rag_triad import aggregate_rag_golden_triad, aggregate_triad
 
 logger = logging.getLogger(__name__)
 
@@ -516,10 +516,37 @@ def conversation_metrics(traces: list[dict]) -> dict:
             "avg_retrieved_tokens": _avg(rag_retrieved),
             "context_cut_rate": round(rag_cuts / turns_with_retrieval, 3) if turns_with_retrieval else 0,
             "rag_tool_calls": rag_calls,
-            "triad": aggregate_triad(finished),
+            "triad": _rag_triad_for_traces(finished),
         },
         "sessions": session_rows[:50],
     }
+
+
+def _rag_triad_for_traces(traces: list[dict]) -> dict:
+    """Prefer RAG golden-set triad scores; fall back to operational proxies."""
+    try:
+        from app.evals.durable import get_golden_store
+        from app.evals.runner import load_public_cases
+
+        cases = load_public_cases()
+        durable = []
+        try:
+            durable = get_golden_store().list_scores()
+        except Exception:
+            durable = []
+        golden = aggregate_rag_golden_triad(cases, traces, durable)
+        proxy = aggregate_triad(traces)
+        # Keep operational rates from proxy; overwrite scores with golden-set method.
+        return {
+            **proxy,
+            **golden,
+            "citation_rate": proxy.get("citation_rate"),
+            "abstain_rate": proxy.get("abstain_rate"),
+            "multi_hop_rate": proxy.get("multi_hop_rate"),
+            "proxy_samples": proxy.get("samples"),
+        }
+    except Exception:
+        return aggregate_triad(traces)
 
 
 def summary(traces: list[dict]) -> dict:

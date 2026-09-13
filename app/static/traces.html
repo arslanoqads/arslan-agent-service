@@ -55,8 +55,8 @@
         <h3>Tokens (avg) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
         <canvas id="chart-tokens"></canvas>
       </div>
-      <div class="chart-card" data-tip="RAG evaluation triad proxies: context relevance (right docs), faithfulness (grounded answers), answer relevance (addresses the ask).">
-        <h3>RAG triad (proxy) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+      <div class="chart-card" data-tip="RAG triad scores from the RAG golden set: average of labeled cases for context relevance, faithfulness, and answer relevance.">
+        <h3>RAG triad (golden set) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
         <canvas id="chart-rag"></canvas>
       </div>
       <div class="chart-card" data-tip="Highest-cost sessions. Spots expensive multi-tool or retrieval-heavy conversations worth optimizing.">
@@ -65,18 +65,19 @@
       </div>
     </section>
 
-    <section class="rag-triage" id="rag-triage" data-tip="Diagnose RAG failures with the triad (query→docs, docs→answer, query→answer) and the fix playbook for each edge.">
-      <h2 class="obs-title">RAG triage · evaluation triad <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h2>
-      <p class="hint" id="rag-triage-note">Context relevance · answer faithfulness · answer relevance (LLM-judge or human). Dashboard uses production proxies until golden-set judges land.</p>
+    <section class="rag-triage" id="rag-triage" data-tip="The three scores average labeled RAG golden cases for each triad edge. The fix guide is what to ship when a score is weak — not itself a metric.">
+      <h2 class="obs-title">RAG triage · golden-set triad <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h2>
+      <p class="hint" id="rag-triage-note">Each score is the average of RAG golden cases labeled for that edge (context relevance, faithfulness, answer relevance).</p>
       <div class="triad-grid" id="triad-scores"></div>
       <div class="triad-meta">
         <div>
-          <h3 class="obs-subtitle">Diagnosis <span class="info-tip" tabindex="0" data-tip="Pattern A–E maps which triad edge failed so you invest in retrieval vs generation vs relevance." aria-label="Why track this">i</span></h3>
+          <h3 class="obs-subtitle">RAG golden cases <span class="info-tip" tabindex="0" data-tip="Labeled prompts for each triad edge. Scores come from matching demo/production traces to these cases." aria-label="Why track this">i</span></h3>
           <p id="rag-diagnosis" class="hint">—</p>
           <div class="pattern-list" id="rag-patterns"></div>
         </div>
         <div>
-          <h3 class="obs-subtitle">Fix playbook <span class="info-tip" tabindex="0" data-tip="Mitigations tied to each triad edge: hybrid search, rewrite, CoVe, abstain, citations, role prompts, multi-step hops." aria-label="Why track this">i</span></h3>
+          <h3 class="obs-subtitle">If a score is low → try these fixes <span class="info-tip" tabindex="0" data-tip="Engineering mitigations for each weak triad edge. This is a how-to guide, not a score. Active = already shipped in this agent." aria-label="Why track this">i</span></h3>
+          <p class="hint" id="rag-playbook-note">When retrieval or grounding fails, apply the matching fix. Status shows what this product already ships.</p>
           <div class="playbook-list" id="rag-playbook"></div>
         </div>
       </div>
@@ -142,6 +143,7 @@
     const ragDiagnosisEl = document.getElementById("rag-diagnosis");
     const ragPatternsEl = document.getElementById("rag-patterns");
     const ragPlaybookEl = document.getElementById("rag-playbook");
+    const ragPlaybookNoteEl = document.getElementById("rag-playbook-note");
     const goldenKpisEl = document.getElementById("golden-kpis");
     const goldenMetricsNoteEl = document.getElementById("golden-metrics-note");
     const tracesMoreBtn = document.getElementById("traces-more");
@@ -416,19 +418,23 @@
       );
     }
 
-    function renderRagTriage(conv) {
+    function renderRagTriage(conv, golden) {
       const rag = conv.rag || {};
-      const triad = rag.triad || {};
+      const triad = ((golden || {}).metrics || {}).rag_triad || rag.triad || {};
       const scores = triad.scores || {};
       const bands = triad.bands || {};
       const diagnosis = triad.diagnosis || {};
       ragNoteEl.textContent = triad.note
-        || "Core evaluation triad: context relevance, answer faithfulness, answer relevance.";
+        || "Each score averages RAG golden cases labeled for that triad edge.";
+      if (ragPlaybookNoteEl) {
+        ragPlaybookNoteEl.textContent = triad.playbook_explained
+          || "When a triad metric is weak, these are the engineering fixes to try. Status = shipped in this agent.";
+      }
       triadScoresEl.replaceChildren();
       [
-        ["Context relevance", scores.context_relevance, bands.context_relevance, "Query → retrieved docs", "Are retrieved chunks useful for the question? Low means the generator reasons over noise."],
-        ["Answer faithfulness", scores.answer_faithfulness, bands.answer_faithfulness, "Context → answer", "Is the answer grounded in evidence (or an honest abstain)? Low means hallucination risk."],
-        ["Answer relevance", scores.answer_relevance, bands.answer_relevance, "Query → answer", "Does the final answer actually address what the user asked?"],
+        ["Context relevance", scores.context_relevance, bands.context_relevance, "Query → docs · golden avg", "Did we fetch the right resume/bio chunks for the labeled asks?"],
+        ["Answer faithfulness", scores.answer_faithfulness, bands.answer_faithfulness, "Docs → answer · golden avg", "Did answers stick to evidence (or abstain) on faithfulness cases?"],
+        ["Answer relevance", scores.answer_relevance, bands.answer_relevance, "Query → answer · golden avg", "Did answers address the labeled user questions?"],
       ].forEach(([label, score, band, edge, tip]) => {
         const card = document.createElement("div");
         card.className = "triad-card";
@@ -441,40 +447,71 @@
         const edgeEl = document.createElement("p");
         edgeEl.className = "triad-edge";
         edgeEl.textContent = edge;
-        card.append(labelEl, valueEl, edgeEl, badge(band || "—", band === "high" ? "ok" : band === "low" ? "fail" : "warn"));
+        const n = ((triad.by_focus_n || {})[label === "Context relevance" ? "context_relevance" : label === "Answer faithfulness" ? "answer_faithfulness" : "answer_relevance"]) || 0;
+        const countEl = document.createElement("p");
+        countEl.className = "triad-edge";
+        countEl.textContent = `${n} golden case${n === 1 ? "" : "s"} scored`;
+        card.append(labelEl, valueEl, edgeEl, countEl, badge(band || "—", band === "high" ? "ok" : band === "low" ? "fail" : "warn"));
         triadScoresEl.appendChild(card);
       });
 
-      ragDiagnosisEl.textContent = diagnosis.code
-        ? `Pattern ${diagnosis.code}: ${diagnosis.label || "—"} · ${triad.samples || 0} retrieval samples · cut rate ${Math.round((rag.context_cut_rate || 0) * 100)}% · multi-hop ${Math.round((triad.multi_hop_rate || 0) * 100)}%`
-        : "No retrieval turns yet.";
+      ragDiagnosisEl.textContent = diagnosis.code && diagnosis.code !== "—"
+        ? `Current pattern ${diagnosis.code}: ${diagnosis.label || "—"} · ${triad.cases_scored || 0}/${triad.cases_total || 0} RAG golden cases scored`
+        : `${triad.cases_scored || 0}/${triad.cases_total || 0} RAG golden cases scored`;
 
       ragPatternsEl.replaceChildren();
-      Object.entries(triad.patterns || {}).forEach(([code, pattern]) => {
-        const row = document.createElement("div");
-        row.className = `pattern-row${diagnosis.code === code ? " active" : ""}`;
-        row.textContent = `${code} · ${pattern.label} (ctx ${pattern.context_relevance}, faith ${pattern.answer_faithfulness}, ans ${pattern.answer_relevance})`;
-        ragPatternsEl.appendChild(row);
+      (triad.cases || []).forEach((row) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "pattern-row";
+        const head = document.createElement("div");
+        head.className = "row-head";
+        const score = row.score;
+        head.append(
+          badge((row.focus || "").replaceAll("_", " "), "neutral"),
+          badge(row.family || "?", row.family === "POS" ? "ok" : row.family === "NEG" ? "fail" : "warn")
+        );
+        if (score == null) head.append(badge("unscored", "warn"));
+        else head.append(badge(`${Math.round(score * 100)}%`, score >= 0.7 ? "ok" : score >= 0.45 ? "warn" : "fail"));
+        const body = document.createElement("div");
+        body.className = "row-body";
+        body.textContent = `${row.case_id} · ${(row.input || "").slice(0, 90)}`;
+        const notes = document.createElement("div");
+        notes.className = "row-notes";
+        notes.textContent = row.notes || "";
+        item.append(head, body);
+        if (row.notes) item.append(notes);
+        item.addEventListener("click", () => {
+          detailEl.textContent = JSON.stringify(row, null, 2);
+        });
+        ragPatternsEl.appendChild(item);
       });
 
       ragPlaybookEl.replaceChildren();
+      const byDim = {};
       (triad.playbook || []).forEach((item) => {
-        const row = document.createElement("div");
-        row.className = "playbook-row";
-        const head = document.createElement("div");
-        head.className = "row-head";
-        head.append(
-          badge(item.status || "planned", item.status === "active" ? "ok" : item.status === "partial" ? "warn" : "neutral"),
-          badge((item.dimension || "").replaceAll("_", " "), "neutral")
-        );
-        const body = document.createElement("div");
-        body.className = "row-body";
-        body.textContent = item.fix || "";
-        const notes = document.createElement("div");
-        notes.className = "row-notes";
-        notes.textContent = item.detail || "";
-        row.append(head, body, notes);
-        ragPlaybookEl.appendChild(row);
+        const key = item.dimension || "other";
+        (byDim[key] = byDim[key] || []).push(item);
+      });
+      [
+        ["context_relevance", "If context relevance is low"],
+        ["answer_faithfulness", "If faithfulness is low"],
+        ["answer_relevance", "If answer relevance is low"],
+      ].forEach(([dim, title]) => {
+        const block = document.createElement("div");
+        block.className = "playbook-row";
+        const titleEl = document.createElement("div");
+        titleEl.className = "row-body";
+        titleEl.style.fontWeight = "700";
+        titleEl.textContent = title;
+        block.appendChild(titleEl);
+        (byDim[dim] || []).forEach((item) => {
+          const line = document.createElement("div");
+          line.className = "row-notes";
+          line.textContent = `${item.status === "active" ? "✓" : item.status === "partial" ? "◐" : "○"} ${item.fix} — ${item.detail}`;
+          block.appendChild(line);
+        });
+        ragPlaybookEl.appendChild(block);
       });
     }
 
@@ -630,7 +667,7 @@
 
       renderKpis(conv);
       renderCharts(conv);
-      renderRagTriage(conv);
+      renderRagTriage(conv, golden);
       renderGoldenMetrics(golden);
       bindTips(document);
 

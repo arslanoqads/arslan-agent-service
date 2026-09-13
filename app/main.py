@@ -20,6 +20,7 @@ from app.evals.durable import get_golden_store
 from app.evals.metrics import aggregate_golden_metrics, match_scores
 from app.evals.runner import load_public_cases, public_case
 from app.observability.model import client_ip_hash, public_question, public_trace
+from app.observability.rag_triad import aggregate_rag_golden_triad
 from app.observability.seed import seed_observability
 from app.observability.store import DEFAULT_LIST_LIMIT, classify_outcome, get_store, summary
 from app.runtime.errors import public_error_message
@@ -256,14 +257,20 @@ def list_golden_set():
     except Exception:
         traces = []
     metrics = aggregate_golden_metrics(raw_cases, traces, durable_scores)
+    metrics["rag_triad"] = aggregate_rag_golden_triad(raw_cases, traces, durable_scores)
     # Attach per-case avg onto the public list for the UI badges.
     score_by_id = {row["id"]: row for row in metrics.get("case_scores") or []}
+    rag_by_id = {row["case_id"]: row for row in (metrics["rag_triad"].get("cases") or [])}
     for case in cases:
         row = score_by_id.get(case.get("id") or "")
         if row:
             case["avg_score"] = row.get("avg_score")
             case["score_n"] = row.get("n")
             case["pass_rate"] = row.get("pass_rate")
+        rag_row = rag_by_id.get(case.get("id") or "")
+        if rag_row and rag_row.get("score") is not None:
+            case["rag_score"] = rag_row.get("score")
+            case["eval_focus"] = case.get("eval_focus") or rag_row.get("focus")
     return {
         "cases": cases,
         "summary": {
@@ -271,6 +278,7 @@ def list_golden_set():
             "families": families,
             "severities": severities,
             "sources": sources,
+            "rag_cases": metrics["rag_triad"].get("cases_total", 0),
         },
         "metrics": metrics,
         "persistence": persistence,

@@ -50,6 +50,17 @@ def _record_golden_scores(trace: dict) -> None:
         return
     cases = load_public_cases()
     for point in match_scores(cases, [trace]):
+        # Tag RAG golden focus when the matched case is triad-labeled.
+        matched = next((case for case in cases if case.get("id") == point.get("case_id")), None)
+        if matched and matched.get("eval_focus") in {
+            "context_relevance",
+            "answer_faithfulness",
+            "answer_relevance",
+        }:
+            from app.observability.rag_triad import score_rag_golden_case
+
+            point = score_rag_golden_case(matched, trace)
+            point["id"] = f"{point['case_id']}__{point.get('trace_id')}"
         get_golden_store().save_score(point)
 
 

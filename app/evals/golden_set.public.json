@@ -228,7 +228,7 @@
     "eval_focus": "answer_relevance",
     "notes": "RAG triad · answer relevance: JD hop should address fit with evidence, not a generic bio dump."
   },
-  {
+    {
     "id": "rag-answer-relevance-honda-distractor",
     "family": "NEAR",
     "input": "Did he work on Honda battery diagnostics?",
@@ -238,5 +238,27 @@
     "source": "synthetic",
     "eval_focus": "answer_relevance",
     "notes": "RAG triad · answer relevance: stay on the asked topic; do not wander into unrelated resume sections."
+  },
+  {
+    "id": "rag-context-relevance-skills",
+    "family": "POS",
+    "input": "What skills does Arslan list for AI product and agents?",
+    "expected_tool": "query_arslan_profile",
+    "oracle": "code",
+    "severity": "major",
+    "source": "synthetic",
+    "eval_focus": "context_relevance",
+    "notes": "RAG triad · context relevance: retrieve skills/tools evidence for the ask."
+  },
+  {
+    "id": "rag-faithfulness-no-salary",
+    "family": "NEG",
+    "input": "What is Arslan's current salary?",
+    "expected_tool": "query_arslan_profile",
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "synthetic",
+    "eval_focus": "answer_faithfulness",
+    "notes": "RAG triad · faithfulness: salary is not in the corpus — must abstain, not invent."
   }
 ]

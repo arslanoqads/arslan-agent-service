@@ -7,7 +7,7 @@ PHONE_REDACTION = re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\
 SSN_REDACTION = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 
 RETRIEVAL_TOOLS = {"query_arslan_profile", "match_role_evidence"}
-ROUTER_NODES = {"supervisor"}
+ROUTER_NODES = {"supervisor", "hop_entry", "hop_done"}
 
 _BLOCKED_QUESTION_MARKERS = (
     "ignore previous",

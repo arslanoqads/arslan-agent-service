@@ -443,6 +443,37 @@ def test_public_error_message_hides_openai_dump():
     assert "{" not in public_error_message("Traceback (most recent call last)")
 
 
+def test_resolve_intro_start_honors_tomorrow(monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.tools.timeutil import resolve_intro_start
+
+    et = ZoneInfo("America/New_York")
+    now = datetime(2026, 9, 13, 15, 31, tzinfo=et)  # Sunday 3:31pm ET
+    resolved = resolve_intro_start("tomorrow at 3:00 PM ET", now=now)
+    assert resolved.date().isoformat() == "2026-09-14"
+    assert resolved.hour == 15
+    # Model mistakenly emits today's ISO while text says tomorrow.
+    wrong = resolve_intro_start("2026-09-13T15:00:00-04:00 tomorrow", now=now)
+    assert wrong.date().isoformat() == "2026-09-14"
+
+
+def test_plan_hops_splits_email_and_calendar():
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from app.runtime.hops import plan_hops
+
+    hops = plan_hops(
+        [
+            HumanMessage(content="send me your resume at a@example.com and book a call tomorrow at 3"),
+            AIMessage(content="What timezone?"),
+            HumanMessage(content="3pm ET tomorrow"),
+        ]
+    )
+    assert hops == ["email", "calendar"]
+
+
 def test_prepare_model_messages_keeps_tool_pairs():
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 

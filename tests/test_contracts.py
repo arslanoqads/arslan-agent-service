@@ -272,7 +272,7 @@ def test_third_chat_returns_exact_budget(monkeypatch, tmp_path):
 
     from app.main import app
 
-    async def fake_stream(message, thread_id):
+    async def fake_stream(message, thread_id, **kwargs):
         yield {"type": "done", "response": "ok", "trace": {"spans": [], "tools": [], "status": "ok"}, "trace_id": "t"}
 
     monkeypatch.setattr("app.main.stream_turn", fake_stream)
@@ -326,7 +326,7 @@ def test_injection_enforces_limit_immediately(monkeypatch, tmp_path):
 
     from app.main import app
 
-    async def fake_stream(message, thread_id):
+    async def fake_stream(message, thread_id, **kwargs):
         yield {"type": "done", "response": "should-not-run", "trace": {"spans": [], "tools": [], "status": "ok"}, "trace_id": "t"}
 
     monkeypatch.setattr("app.main.stream_turn", fake_stream)
@@ -549,6 +549,71 @@ def test_golden_store_merges_durable_cases(tmp_path, monkeypatch):
     cases = runner.load_public_cases()
     assert any(case.get("id") == "prod-extra-1" for case in cases)
     assert len(cases) >= 2
+
+
+def test_traces_list_scoped_to_visitor_ip(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-used")
+    monkeypatch.setenv("TRACE_SQLITE_PATH", str(tmp_path / "ip-traces.sqlite"))
+    monkeypatch.setenv("TRACE_BACKEND", "sqlite")
+    monkeypatch.setenv("OBSERVABILITY_TOKEN", "test-token")
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    monkeypatch.delenv("RAG_GCS_BUCKET", raising=False)
+    import app.evals.durable as durable
+    import app.main as main_mod
+    import app.observability.store as store_mod
+    from app.observability.model import client_ip_hash, new_trace
+    from app.observability.seed import seed_observability
+    from fastapi.testclient import TestClient
+
+    store_mod._store = None
+    store_mod._memory = store_mod.MemoryTraceStore()
+    durable._store = durable.CompositeGoldenStore([])
+    main_mod._store = store_mod.get_store()
+
+    seed_observability(force=True, sessions=8)
+    mine = new_trace("mine-thread", "hello from me", client_ip="203.0.113.10")
+    mine.update(
+        {
+            "status": "ok",
+            "outcome": "success",
+            "duration_ms": 10,
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "tools": [],
+            "spans": [],
+            "demo": False,
+        }
+    )
+    other = new_trace("other-thread", "hello from other", client_ip="198.51.100.99")
+    other.update(
+        {
+            "status": "ok",
+            "outcome": "success",
+            "duration_ms": 10,
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "tools": [],
+            "spans": [],
+            "demo": False,
+        }
+    )
+    main_mod._store.save(mine)
+    main_mod._store.save(other)
+
+    from app.main import app
+
+    client = TestClient(app)
+    res = client.get("/observability/traces", headers={"x-forwarded-for": "203.0.113.10"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["scoped_to_visitor"] is True
+    ids = {item["id"] for item in data["traces"]}
+    assert mine["id"] in ids
+    assert other["id"] not in ids
+    assert all(not item.get("demo") for item in data["traces"])
+    # Dashboard metrics still include seeded demo traffic.
+    assert (data["summary"]["conversation"]["totals"]["sessions"] or 0) >= 8
+    assert client_ip_hash("203.0.113.10") == mine["client_ip_hash"]
 
 
 def test_demo_seed_builds_rich_week(tmp_path, monkeypatch):

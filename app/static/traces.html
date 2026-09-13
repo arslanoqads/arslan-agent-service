@@ -114,13 +114,16 @@
 
     <section class="obs-grid">
       <div>
-        <h2 class="obs-title">Traces</h2>
+        <h2 class="obs-title">Your traces <span class="info-tip" tabindex="0" data-tip="Only past chats from your current IP (hashed). Demo traffic stays in the charts above, not in this list." aria-label="Why track this">i</span></h2>
+        <p class="hint" id="trace-list-meta">Showing your visits only</p>
         <div class="trace-list" id="list"></div>
+        <button id="traces-more" class="page-more" type="button" hidden>View next 5</button>
       </div>
       <div>
-        <h2 class="obs-title">Golden set</h2>
+        <h2 class="obs-title">Golden set <span class="info-tip" tabindex="0" data-tip="Labeled regression cases. Browse five at a time." aria-label="Why track this">i</span></h2>
         <p class="hint" id="golden-summary">Classification: family · severity · source</p>
         <div class="trace-list" id="golden-list"></div>
+        <button id="golden-more" class="page-more" type="button" hidden>View next 5</button>
       </div>
     </section>
 
@@ -141,6 +144,14 @@
     const ragPlaybookEl = document.getElementById("rag-playbook");
     const goldenKpisEl = document.getElementById("golden-kpis");
     const goldenMetricsNoteEl = document.getElementById("golden-metrics-note");
+    const tracesMoreBtn = document.getElementById("traces-more");
+    const goldenMoreBtn = document.getElementById("golden-more");
+    const traceListMetaEl = document.getElementById("trace-list-meta");
+    const PAGE_SIZE = 5;
+    let allMyTraces = [];
+    let allGoldenCases = [];
+    let tracesVisible = PAGE_SIZE;
+    let goldenVisible = PAGE_SIZE;
     const charts = {};
     const kpiTips = {
       "Sessions": "Unique conversation threads. The denominator for per-session cost, tools, and health.",
@@ -467,6 +478,41 @@
       });
     }
 
+    function renderPaged(items, visible, container, rowFn, moreBtn, metaEl, label) {
+      const shown = items.slice(0, visible);
+      container.replaceChildren();
+      if (!shown.length) {
+        const empty = document.createElement("p");
+        empty.className = "hint";
+        empty.textContent = label === "traces"
+          ? "No traces from this IP yet. Chat from this network, then refresh."
+          : "No golden cases.";
+        container.appendChild(empty);
+      } else {
+        shown.forEach((item) => container.appendChild(rowFn(item)));
+      }
+      const remaining = Math.max(0, items.length - shown.length);
+      if (metaEl) {
+        metaEl.textContent = items.length
+          ? `Showing ${shown.length} of ${items.length}${label === "traces" ? " for this IP" : ""}`
+          : (label === "traces" ? "No visits from this IP yet" : "Empty");
+      }
+      if (remaining > 0) {
+        moreBtn.hidden = false;
+        moreBtn.textContent = `View next ${Math.min(PAGE_SIZE, remaining)}`;
+      } else {
+        moreBtn.hidden = true;
+      }
+    }
+
+    function renderTracePage() {
+      renderPaged(allMyTraces, tracesVisible, listEl, renderTraceRow, tracesMoreBtn, traceListMetaEl, "traces");
+    }
+
+    function renderGoldenPage() {
+      renderPaged(allGoldenCases, goldenVisible, goldenListEl, renderGoldenRow, goldenMoreBtn, null, "golden");
+    }
+
     function renderTraceRow(trace) {
       const button = document.createElement("button");
       button.type = "button";
@@ -571,8 +617,10 @@
 
       const traces = data.traces || [];
       const conv = (data.summary || {}).conversation || {};
-      const failed = traces.filter((t) => (t.outcome || "").includes("error") || t.status === "error");
-      statusEl.textContent = `${traces.length} traces · ${(conv.totals || {}).sessions || 0} sessions · ${failed.length} failed · ${(golden.cases || []).length} golden cases`;
+      const failed = ((data.summary || {}).outcomes && Object.entries(data.summary.outcomes || {})
+        .filter(([key]) => key.includes("error"))
+        .reduce((sum, [, n]) => sum + n, 0)) || 0;
+      statusEl.textContent = `${traces.length} your traces · ${(conv.totals || {}).sessions || 0} dashboard sessions · ${failed} failed · ${(golden.cases || []).length} golden cases`;
       const persistence = data.persistence || {};
       if (persistence.last_errors && Object.keys(persistence.last_errors).length) {
         statusEl.textContent += ` · persistence warnings: ${Object.keys(persistence.last_errors).join(", ")}`;
@@ -589,15 +637,26 @@
       const summary = data.summary || {};
       summaryEl.textContent = `Failure rate ${Math.round((summary.failure_rate || 0) * 100)}% · avg turn ${summary.avg_duration_ms || 0} ms · avg tokens ${summary.avg_tokens || 0} · cost/request $${summary.cost_per_request || 0} · cost/success $${summary.cost_per_success || 0}`;
 
-      listEl.replaceChildren();
-      traces.forEach((trace) => listEl.appendChild(renderTraceRow(trace)));
+      allMyTraces = traces;
+      tracesVisible = PAGE_SIZE;
+      renderTracePage();
 
       const gSummary = golden.summary || {};
       const gMetrics = golden.metrics || {};
       goldenSummaryEl.textContent = `${gSummary.count || 0} cases · avg ${Math.round((gMetrics.overall_avg || 0) * 100)}% · pass ${Math.round((gMetrics.pass_rate || 0) * 100)}% · families ${JSON.stringify(gSummary.families || {})} · severities ${JSON.stringify(gSummary.severities || {})} · sources ${JSON.stringify(gSummary.sources || {})}`;
-      goldenListEl.replaceChildren();
-      (golden.cases || []).forEach((caseItem) => goldenListEl.appendChild(renderGoldenRow(caseItem)));
+      allGoldenCases = golden.cases || [];
+      goldenVisible = PAGE_SIZE;
+      renderGoldenPage();
     }
+
+    tracesMoreBtn.addEventListener("click", () => {
+      tracesVisible += PAGE_SIZE;
+      renderTracePage();
+    });
+    goldenMoreBtn.addEventListener("click", () => {
+      goldenVisible += PAGE_SIZE;
+      renderGoldenPage();
+    });
 
     document.getElementById("load").addEventListener("click", load);
     load();

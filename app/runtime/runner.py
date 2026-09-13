@@ -2,7 +2,6 @@ import time
 from datetime import datetime, timezone
 
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.memory import MemorySaver
 
 from app.agent.graph import MODEL_NAME, PIPELINE_VERSION, PROMPT_VERSION, RECURSION_LIMIT, SYSTEM_PROMPT, TOOLS_BRIEF, TOKEN_CEILING, builder
 from app.cache.answers import cacheable, lookup, store as store_answer
@@ -14,10 +13,13 @@ from app.observability.store import get_store
 from app.rag.corpus import corpus_fingerprint
 from app.runtime.errors import public_error_message
 from app.runtime.route import DEGRADED_MESSAGE, TOKEN_CEILING_MESSAGE, is_greeting, is_links_request, is_provider_failure
+from app.runtime.threads import append_turn, load_turns, turns_as_messages
 from app.tools.actions import format_social_links
 from app.tools.limits import current_thread_id, current_user_message
 
-_graph = builder.compile(checkpointer=MemorySaver())
+# No process-local checkpointer: Cloud Run hops would drop MemorySaver state.
+# Durable turns are loaded from the thread store on every request.
+_graph = builder.compile()
 _store = None
 
 
@@ -91,7 +93,7 @@ def _stamp_budget(trace: dict) -> None:
         trace["context_budget"] = budget
 
 
-def complete_short(trace: dict, *, started: float, name: str, kind: str, output: str, stop_reason: str, route: str):
+def complete_short(trace: dict, *, started: float, name: str, kind: str, output: str, stop_reason: str, route: str, thread_id: str | None = None, message: str | None = None):
     span = new_span(
         name=name,
         kind=kind,
@@ -109,6 +111,8 @@ def complete_short(trace: dict, *, started: float, name: str, kind: str, output:
         trace["error_kind"] = "guardrail"
     finish_trace(trace, status="ok", started=started)
     save_trace(trace)
+    if thread_id and message:
+        append_turn(thread_id, message, output)
     return {"type": "done", "response": output, "trace": public_trace(trace), "trace_id": trace["id"]}
 
 
@@ -141,7 +145,9 @@ async def stream_turn(message: str, thread_id: str):
     started = time.perf_counter()
     open_spans: dict[str, dict] = {}
     loop_index = 0
-    packed = assemble(SYSTEM_PROMPT, TOOLS_BRIEF, "", [])
+    prior_turns = load_turns(thread_id)
+    history_messages = turns_as_messages(prior_turns)
+    packed = assemble(SYSTEM_PROMPT, TOOLS_BRIEF, "", [turn.get("content") or "" for turn in prior_turns])
     current_context_budget.set(packed["context_budget"])
     trace["context_budget"] = packed["context_budget"]
     trace["pipeline_version"] = PIPELINE_VERSION
@@ -176,7 +182,8 @@ async def stream_turn(message: str, thread_id: str):
         current_user_message.reset(message_token)
         return
 
-    if is_greeting(message):
+    # Standalone greeting only when the thread is empty. "yes" after a booking offer must not reset.
+    if is_greeting(message) and not prior_turns:
         yield complete_short(
             trace,
             started=started,
@@ -185,12 +192,14 @@ async def stream_turn(message: str, thread_id: str):
             output="Hello. I can answer from the resume, email it, book a 30-minute intro call, compare a job description, or share public links.",
             stop_reason=None,
             route="greeting",
+            thread_id=thread_id,
+            message=message,
         )
         current_thread_id.reset(thread_token)
         current_user_message.reset(message_token)
         return
 
-    if is_links_request(message):
+    if is_links_request(message) and not prior_turns:
         yield complete_short(
             trace,
             started=started,
@@ -199,34 +208,42 @@ async def stream_turn(message: str, thread_id: str):
             output=format_social_links(),
             stop_reason=None,
             route="greeting",
+            thread_id=thread_id,
+            message=message,
         )
         current_thread_id.reset(thread_token)
         current_user_message.reset(message_token)
         return
 
     fingerprint = corpus_fingerprint()
-    cached = lookup(message, fingerprint)
+    # Never serve a cached answer into an active conversation — follow-ups need history.
+    cached = None if prior_turns else lookup(message, fingerprint, embed=_embed)
     if cached:
-        trace["cache"] = cached
+        cache_kind = cached.get("kind") or "exact"
+        trace["cache"] = {"kind": cache_kind, "similarity": cached.get("similarity")}
         trace["tools"] = []
         yield complete_short(
             trace,
             started=started,
-            name="cache",
-            kind="retrieval",
+            name=f"{cache_kind}_cache",
+            kind="cache",
             output=cached["answer"],
-            stop_reason=None,
+            stop_reason=f"cache_{cache_kind}",
             route="portfolio",
+            thread_id=thread_id,
+            message=message,
         )
         current_thread_id.reset(thread_token)
         current_user_message.reset(message_token)
         return
 
     trace["route"] = "portfolio"
+    last_ai_text = ""
     try:
-        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": RECURSION_LIMIT}
+        config = {"recursion_limit": RECURSION_LIMIT}
+        graph_input = {"messages": history_messages + [HumanMessage(content=message)]}
         async for event in _graph.astream_events(
-            {"messages": [HumanMessage(content=message)]},
+            graph_input,
             config=config,
             version="v2",
         ):
@@ -260,9 +277,12 @@ async def stream_turn(message: str, thread_id: str):
                 prompt_tokens, completion_tokens = _usage(output)
                 span["input_tokens"] = prompt_tokens
                 span["output_tokens"] = completion_tokens
-                close_span(span, ended_perf=time.perf_counter(), output=_text(output))
+                text = _text(output)
+                close_span(span, ended_perf=time.perf_counter(), output=text)
                 trace["input_tokens"] += prompt_tokens
                 trace["output_tokens"] += completion_tokens
+                if text and not getattr(output, "tool_calls", None):
+                    last_ai_text = text
             elif kind == "on_tool_start":
                 loop_index += 1
                 tool_name = name
@@ -316,14 +336,18 @@ async def stream_turn(message: str, thread_id: str):
             save_trace(trace)
             yield {"type": "trace", "trace": public_trace(trace)}
 
-        state = await _graph.aget_state({"configurable": {"thread_id": thread_id}})
-        messages = state.values.get("messages") or []
-        answer = _text(messages[-1]) if messages else ""
-        if cacheable(message) and answer:
+        answer = last_ai_text
+        if not answer:
+            result = await _graph.ainvoke(graph_input, config=config)
+            messages = result.get("messages") or []
+            answer = _text(messages[-1]) if messages else ""
+
+        if cacheable(message) and answer and not prior_turns:
             try:
                 store_answer(message, answer, fingerprint, embed=_embed)
             except Exception:
                 store_answer(message, answer, fingerprint)
+        append_turn(thread_id, message, answer)
         finish_trace(trace, status="ok", started=started)
         save_trace(trace)
         yield {"type": "done", "response": answer, "trace": public_trace(trace), "trace_id": trace["id"]}
@@ -343,6 +367,7 @@ async def stream_turn(message: str, thread_id: str):
         trace["route"] = trace.get("route") or "portfolio"
         finish_trace(trace, status="error", started=started, error=detail)
         save_trace(trace)
+        append_turn(thread_id, message, friendly)
         # Visitors get a calm reply; the private trace keeps the raw error.
         yield {
             "type": "done",

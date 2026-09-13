@@ -24,5 +24,6 @@ docs/
 
 # Local traces and private eval labels
 data/traces.sqlite
+data/threads.sqlite
 data/index/
 tests/evals/golden_set.private.json

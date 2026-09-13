@@ -31,6 +31,11 @@
         The assistant can answer from the resume, email it, book a 30-minute intro call,
         compare a job description, or share public links. This turn's trace stays on the page.
       </p>
+      <p class="prompt-guide">
+        Write your first prompt like a real recruiter note: one clear ask, plus any details the tool needs
+        (your email for resume delivery, day/time and timezone for a call, or the job description to compare).
+        Or tap a capability below to start.
+      </p>
       <div class="chips" id="suggestions">
         <button type="button" data-prompt="What is Arslan known for professionally?">Profile background</button>
         <button type="button" data-prompt="Email the resume to me@example.com">Email resume</button>
@@ -57,7 +62,7 @@
           Send
         </button>
       </form>
-      <p class="hint">Demo limit: 5 questions per IP every 30 minutes. Unsafe or injection attempts end the window immediately. Session uses an in-memory <code>thread_id</code>.</p>
+      <p class="hint">Demo limit: 5 questions per IP every 30 minutes.</p>
     </section>
     <aside class="trace-panel" aria-live="polite">
       <div class="trace-head">

@@ -130,6 +130,13 @@ body {
   line-height: 1.55;
 }
 
+.intro .prompt-guide {
+  margin-top: 0.85rem;
+  max-width: 62ch;
+  color: var(--ink);
+  font-weight: 500;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;

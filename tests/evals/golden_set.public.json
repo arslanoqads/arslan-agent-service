@@ -1,1 +1,101 @@
-[]
+[
+  {
+    "id": "prod-email-resume-tool",
+    "family": "POS",
+    "input": "send me your resume at arslanoqads@gmail.com",
+    "expected_tool": "send_resume_email",
+    "must_include": [],
+    "must_not_include": ["system prompt", "Ignore previous"],
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "production",
+    "notes": "Production failure when Gmail API was disabled; tool must still be selected."
+  },
+  {
+    "id": "prod-meeting-offer-followup",
+    "family": "POS",
+    "input": "set up a meeting with me at 2:30 ET tomorrow for 15 mins at arslanoqads@gmail.com",
+    "expected_tool": "schedule_intro_call",
+    "must_include": [],
+    "must_not_include": ["How can I assist you today"],
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "production",
+    "notes": "Should book the fixed 30-minute slot without asking permission again."
+  },
+  {
+    "id": "prod-yes-after-booking-offer",
+    "family": "NEAR",
+    "input": "yes",
+    "prior_turns": [
+      {
+        "role": "user",
+        "content": "set up a meeting with me at 2:30 ET tomorrow for 15 mins at arslanoqads@gmail.com"
+      },
+      {
+        "role": "assistant",
+        "content": "I can schedule a 30-minute intro call for you. Would you like me to proceed with that duration, or would you prefer a different arrangement?"
+      }
+    ],
+    "expected_tool": "schedule_intro_call",
+    "expected_route": "portfolio_agent",
+    "must_include": [],
+    "must_not_include": ["How can I assist you today", "Hello!"],
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "production",
+    "notes": "Regression: short yes must not reset to the greeting desk."
+  },
+  {
+    "id": "prod-did-you-set-up-meeting",
+    "family": "NEAR",
+    "input": "did you set up the meeting?",
+    "prior_turns": [
+      {
+        "role": "user",
+        "content": "set up a meeting with me at 2:30 ET tomorrow for 15 mins at arslanoqads@gmail.com"
+      },
+      {
+        "role": "assistant",
+        "content": "I can schedule a 30-minute intro call for you. Would you like me to proceed with that duration?"
+      },
+      {
+        "role": "user",
+        "content": "yes"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello! How can I assist you today?"
+      }
+    ],
+    "expected_tool": "schedule_intro_call",
+    "expected_route": "portfolio_agent",
+    "must_not_include": ["How can I assist you today"],
+    "oracle": "code",
+    "severity": "major",
+    "source": "production",
+    "notes": "Follow-up must keep session context and retry booking with tomorrow 2:30 ET."
+  },
+  {
+    "id": "syn-greeting-no-tool",
+    "family": "POS",
+    "input": "hello",
+    "expected_tool": "none",
+    "expected_route": "general_responder",
+    "oracle": "code",
+    "severity": "major",
+    "source": "synthetic"
+  },
+  {
+    "id": "syn-confirmation-without-history-stays-portfolio",
+    "family": "NEAR",
+    "input": "yes",
+    "expected_tool": "none",
+    "expected_route": "portfolio_agent",
+    "must_not_include": [],
+    "oracle": "code",
+    "severity": "major",
+    "source": "synthetic",
+    "notes": "Bare yes with no history still avoids the greeting short-circuit; portfolio may ask what to confirm."
+  }
+]

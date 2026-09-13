@@ -201,6 +201,14 @@ def test_public_trace_hides_context_and_emails():
     assert "secret stack" not in dumped
 
 
+def test_public_trace_includes_cache_kind():
+    trace = new_trace_record("thread", "What is Arslan known for?")
+    trace["cache"] = {"kind": "semantic", "similarity": 0.97, "answer": "secret resume text"}
+    public = public_trace(trace)
+    assert public["cache"] == {"kind": "semantic", "similarity": 0.97}
+    assert "secret resume text" not in str(public)
+
+
 def test_public_question_redacts_blocked_and_phone():
     from app.observability.model import public_question
 
@@ -338,7 +346,7 @@ def test_context_budget_cuts_history_before_system():
 
 
 def test_exact_and_semantic_cache_skip_actions():
-    from app.cache.answers import invalidate, lookup, store
+    from app.cache.answers import cacheable, invalidate, lookup, store
 
     invalidate()
 
@@ -350,6 +358,57 @@ def test_exact_and_semantic_cache_skip_actions():
     assert lookup("Tell me his experience", "fp", embed)["kind"] == "semantic"
     assert lookup("Email the resume to a@example.com", "fp", embed) is None
     assert lookup("What is his background?", "next", embed) is None
+    assert cacheable("yes") is False
+    assert cacheable("ok") is False
+
+
+def test_choose_route_keeps_followups_on_portfolio():
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from app.runtime.route import choose_route
+
+    history = [
+        HumanMessage(content="set up a meeting with me at 2:30 ET tomorrow for 15 mins at a@example.com"),
+        AIMessage(content="I can schedule a 30-minute intro call. Proceed?"),
+        HumanMessage(content="yes"),
+    ]
+    assert choose_route(history) == "portfolio_agent"
+    assert (
+        choose_route(
+            [
+                HumanMessage(content="set up a meeting tomorrow at 2:30 ET"),
+                AIMessage(content="I can book that."),
+                HumanMessage(content="did you set up the meeting?"),
+            ]
+        )
+        == "portfolio_agent"
+    )
+    assert choose_route([HumanMessage(content="hello")]) == "general_responder"
+    assert choose_route([HumanMessage(content="yes")]) == "portfolio_agent"
+
+
+def test_thread_store_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setenv("THREAD_SQLITE_PATH", str(tmp_path / "threads.sqlite"))
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    monkeypatch.delenv("TRACE_BACKEND", raising=False)
+    import app.runtime.threads as threads
+
+    threads._store = None
+    threads._memory = threads.MemoryThreadStore()
+    thread_id = f"t-{tmp_path.name}"
+    threads.append_turn(thread_id, "book tomorrow 2:30", "I can book a 30-minute call. Proceed?")
+    threads.append_turn(thread_id, "yes", "Booking now.")
+    loaded = threads.load_turns(thread_id)
+    assert len(loaded) == 4
+    assert loaded[-2]["content"] == "yes"
+    messages = threads.turns_as_messages(loaded)
+    assert messages[-1].content == "Booking now."
+
+
+def test_golden_set_scaffold_and_routes():
+    from app.evals.runner import run
+
+    assert run() == 0
 
 
 def test_public_error_message_hides_openai_dump():

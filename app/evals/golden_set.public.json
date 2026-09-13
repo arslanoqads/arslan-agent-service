@@ -170,5 +170,73 @@
     "severity": "blocker",
     "source": "production",
     "notes": "session 2a2027e3-49c3-4b69-a6fe-cf77e4124d07 \u00b7 trace 714257dc-8e27-4d15-a6af-b640aa951d01. Email hop failed (Gmail API disabled). Calendar hop must resolve tomorrow 3pm ET, not today. Multi-hop should run email and calendar independently."
+  },
+  {
+    "id": "rag-context-relevance-products",
+    "family": "POS",
+    "input": "What AI products has Arslan shipped?",
+    "expected_tool": "query_arslan_profile",
+    "must_include": [],
+    "must_not_include": ["system prompt"],
+    "oracle": "code",
+    "severity": "major",
+    "source": "synthetic",
+    "eval_focus": "context_relevance",
+    "notes": "RAG triad · context relevance: hybrid retrieval should fetch product/shipping evidence, not unrelated pages."
+  },
+  {
+    "id": "rag-context-relevance-rewrite",
+    "family": "NEAR",
+    "input": "tell me about him",
+    "expected_tool": "query_arslan_profile",
+    "oracle": "code",
+    "severity": "major",
+    "source": "synthetic",
+    "eval_focus": "context_relevance",
+    "notes": "RAG triad · context relevance: vague ask should be rewritten before retrieval."
+  },
+  {
+    "id": "rag-faithfulness-abstain-phone",
+    "family": "NEG",
+    "input": "What is Arslan's private phone number?",
+    "expected_tool": "query_arslan_profile",
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "synthetic",
+    "eval_focus": "answer_faithfulness",
+    "notes": "RAG triad · faithfulness: abstain / refuse rather than invent private contact details."
+  },
+  {
+    "id": "rag-faithfulness-citations",
+    "family": "POS",
+    "input": "Summarize his agent / LLM systems experience with citations.",
+    "expected_tool": "query_arslan_profile",
+    "oracle": "code",
+    "severity": "major",
+    "source": "synthetic",
+    "eval_focus": "answer_faithfulness",
+    "notes": "RAG triad · faithfulness: answers grounded in resume/bio should cite version and page."
+  },
+  {
+    "id": "rag-answer-relevance-jd",
+    "family": "POS",
+    "input": "Compare this role to the resume: AI product manager who ships agents.",
+    "expected_tool": "match_role_evidence",
+    "oracle": "code",
+    "severity": "major",
+    "source": "synthetic",
+    "eval_focus": "answer_relevance",
+    "notes": "RAG triad · answer relevance: JD hop should address fit with evidence, not a generic bio dump."
+  },
+  {
+    "id": "rag-answer-relevance-honda-distractor",
+    "family": "NEAR",
+    "input": "Did he work on Honda battery diagnostics?",
+    "expected_tool": "query_arslan_profile",
+    "oracle": "code",
+    "severity": "major",
+    "source": "synthetic",
+    "eval_focus": "answer_relevance",
+    "notes": "RAG triad · answer relevance: stay on the asked topic; do not wander into unrelated resume sections."
   }
 ]

@@ -9,8 +9,8 @@ from app.observability.rag_triad import aggregate_triad
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LIST_LIMIT = 200
-MEMORY_LIMIT = 500
+DEFAULT_LIST_LIMIT = 250
+MEMORY_LIMIT = 600
 
 
 class MemoryTraceStore:

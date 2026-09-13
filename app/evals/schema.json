@@ -29,6 +29,11 @@
     "oracle": {"type": "string", "enum": ["code", "regex", "exact"]},
     "severity": {"type": "string", "enum": ["blocker", "major"]},
     "source": {"type": "string", "enum": ["synthetic", "production"]},
-    "notes": {"type": "string"}
+    "notes": {"type": "string"},
+    "eval_focus": {
+      "type": "string",
+      "enum": ["context_relevance", "answer_faithfulness", "answer_relevance", "contract"]
+    },
+    "demo": {"type": "boolean"}
   }
 }

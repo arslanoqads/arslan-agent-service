@@ -31,43 +31,82 @@
 
     <section class="kpi-grid" id="kpi"></section>
     <section class="chart-grid">
-      <div class="chart-card"><h3>Tools per session</h3><canvas id="chart-tools-session"></canvas></div>
-      <div class="chart-card"><h3>Outcomes</h3><canvas id="chart-outcomes"></canvas></div>
-      <div class="chart-card"><h3>Tool failures</h3><canvas id="chart-tool-failures"></canvas></div>
-      <div class="chart-card"><h3>Latency & TTFT (ms)</h3><canvas id="chart-latency"></canvas></div>
-      <div class="chart-card"><h3>Loops & retries</h3><canvas id="chart-loops"></canvas></div>
-      <div class="chart-card"><h3>Tokens (avg)</h3><canvas id="chart-tokens"></canvas></div>
-      <div class="chart-card"><h3>RAG triad (proxy)</h3><canvas id="chart-rag"></canvas></div>
-      <div class="chart-card"><h3>Cost per session (top)</h3><canvas id="chart-cost-session"></canvas></div>
+      <div class="chart-card" data-tip="Distribution of how many distinct tools a session used (0/1/2/3+). Shows whether visitors exercise single-tool or multi-hop flows.">
+        <h3>Tools per session <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+        <canvas id="chart-tools-session"></canvas>
+      </div>
+      <div class="chart-card" data-tip="Turn outcomes (success, tool_error, guardrail, refused). The mix tells you whether failures are model, tool, or policy issues.">
+        <h3>Outcomes <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+        <canvas id="chart-outcomes"></canvas>
+      </div>
+      <div class="chart-card" data-tip="Which tools fail most often. Use this to prioritize API enablement, auth, and validation fixes.">
+        <h3>Tool failures <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+        <canvas id="chart-tool-failures"></canvas>
+      </div>
+      <div class="chart-card" data-tip="End-to-end latency and time-to-first-token. TTFT tracks perceived snappiness; p95 catches tail pain users feel.">
+        <h3>Latency & TTFT (ms) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+        <canvas id="chart-latency"></canvas>
+      </div>
+      <div class="chart-card" data-tip="Agent loops and retries. Rising loops/retries usually mean brittle tool schemas, message-shape bugs, or provider flakiness.">
+        <h3>Loops & retries <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+        <canvas id="chart-loops"></canvas>
+      </div>
+      <div class="chart-card" data-tip="Average input/output tokens per turn. Tracks cost drivers and context bloat before you hit ceilings.">
+        <h3>Tokens (avg) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+        <canvas id="chart-tokens"></canvas>
+      </div>
+      <div class="chart-card" data-tip="RAG evaluation triad proxies: context relevance (right docs), faithfulness (grounded answers), answer relevance (addresses the ask).">
+        <h3>RAG triad (proxy) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+        <canvas id="chart-rag"></canvas>
+      </div>
+      <div class="chart-card" data-tip="Highest-cost sessions. Spots expensive multi-tool or retrieval-heavy conversations worth optimizing.">
+        <h3>Cost per session (top) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+        <canvas id="chart-cost-session"></canvas>
+      </div>
     </section>
 
-    <section class="rag-triage" id="rag-triage">
-      <h2 class="obs-title">RAG triage · evaluation triad</h2>
+    <section class="rag-triage" id="rag-triage" data-tip="Diagnose RAG failures with the triad (query→docs, docs→answer, query→answer) and the fix playbook for each edge.">
+      <h2 class="obs-title">RAG triage · evaluation triad <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h2>
       <p class="hint" id="rag-triage-note">Context relevance · answer faithfulness · answer relevance (LLM-judge or human). Dashboard uses production proxies until golden-set judges land.</p>
       <div class="triad-grid" id="triad-scores"></div>
       <div class="triad-meta">
         <div>
-          <h3 class="obs-subtitle">Diagnosis</h3>
+          <h3 class="obs-subtitle">Diagnosis <span class="info-tip" tabindex="0" data-tip="Pattern A–E maps which triad edge failed so you invest in retrieval vs generation vs relevance." aria-label="Why track this">i</span></h3>
           <p id="rag-diagnosis" class="hint">—</p>
           <div class="pattern-list" id="rag-patterns"></div>
         </div>
         <div>
-          <h3 class="obs-subtitle">Fix playbook</h3>
+          <h3 class="obs-subtitle">Fix playbook <span class="info-tip" tabindex="0" data-tip="Mitigations tied to each triad edge: hybrid search, rewrite, CoVe, abstain, citations, role prompts, multi-step hops." aria-label="Why track this">i</span></h3>
           <div class="playbook-list" id="rag-playbook"></div>
         </div>
       </div>
     </section>
 
-    <section class="rag-triage" id="golden-metrics">
-      <h2 class="obs-title">Golden set · category scores</h2>
+    <section class="rag-triage" id="golden-metrics" data-tip="Contract scores for golden cases by category, plus daily average trend. Proves the agent still passes labeled regressions.">
+      <h2 class="obs-title">Golden set · category scores <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h2>
       <p class="hint" id="golden-metrics-note">Average contract scores by family, severity, source, and tool — plus daily average over time.</p>
       <div class="triad-grid" id="golden-kpis"></div>
       <div class="chart-grid golden-charts">
-        <div class="chart-card"><h3>By family</h3><canvas id="chart-golden-family"></canvas></div>
-        <div class="chart-card"><h3>By severity</h3><canvas id="chart-golden-severity"></canvas></div>
-        <div class="chart-card"><h3>By source</h3><canvas id="chart-golden-source"></canvas></div>
-        <div class="chart-card"><h3>By expected tool</h3><canvas id="chart-golden-tool"></canvas></div>
-        <div class="chart-card chart-wide"><h3>Average score over time</h3><canvas id="chart-golden-time"></canvas></div>
+        <div class="chart-card" data-tip="POS should stay high; NEAR/NEG watch regressions on ambiguous and adversarial asks.">
+          <h3>By family <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+          <canvas id="chart-golden-family"></canvas>
+        </div>
+        <div class="chart-card" data-tip="Blockers are release gates; majors are important but can be scheduled.">
+          <h3>By severity <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+          <canvas id="chart-golden-severity"></canvas>
+        </div>
+        <div class="chart-card" data-tip="Production-sourced cases reflect real user pain; synthetic cases cover designed edge cases.">
+          <h3>By source <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+          <canvas id="chart-golden-source"></canvas>
+        </div>
+        <div class="chart-card" data-tip="Which tool contracts are healthy. A dip on one tool points to that integration.">
+          <h3>By expected tool <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+          <canvas id="chart-golden-tool"></canvas>
+        </div>
+        <div class="chart-card chart-wide" data-tip="Daily mean golden score. Use this to spot quality drift after prompt, model, or retrieval changes.">
+          <h3>Average score over time <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+          <canvas id="chart-golden-time"></canvas>
+        </div>
       </div>
     </section>
 
@@ -103,6 +142,41 @@
     const goldenKpisEl = document.getElementById("golden-kpis");
     const goldenMetricsNoteEl = document.getElementById("golden-metrics-note");
     const charts = {};
+    const kpiTips = {
+      "Sessions": "Unique conversation threads. The denominator for per-session cost, tools, and health.",
+      "Turns": "Individual user asks. Volume and load signal for the agent.",
+      "Tool failures": "Failed tool invocations. Early warning for Gmail/Calendar/RAG outages.",
+      "Avg latency": "Mean end-to-end response time. Baseline for user wait.",
+      "Avg TTFT": "Time to first token. Tracks how fast the answer starts streaming.",
+      "P95 latency": "Tail latency. Catches the slow sessions averages hide.",
+      "Retries": "Provider/tool retries. Spikes mean instability or message-shape errors.",
+      "Avg loops": "Graph/tool loops per turn. High loops often mean the agent is thrashing.",
+      "Session tokens": "Total tokens across listed sessions. Primary cost envelope.",
+      "In / out tokens": "Prompt vs completion tokens. Shows whether cost is context or generation heavy.",
+      "Cost total": "Estimated USD for listed turns. Keeps demo spend visible.",
+      "Cost / session": "Average USD per session. Useful for unit-economics storytelling.",
+      "Context relevance": "Did retrieval fetch useful docs for the query? Low ⇒ fix search/rewrite.",
+      "Faithfulness": "Did the answer stick to retrieved facts (or abstain)? Low ⇒ hallucination risk.",
+      "Answer relevance": "Did the final answer address the user ask? Low ⇒ off-topic grounded answers.",
+      "RAG turn rate": "Share of turns that called retrieval tools. Context for triad sample size.",
+    };
+
+    function tipButton(text) {
+      const tip = document.createElement("span");
+      tip.className = "info-tip";
+      tip.tabIndex = 0;
+      tip.textContent = "i";
+      tip.setAttribute("aria-label", "Why track this");
+      tip.dataset.tip = text;
+      return tip;
+    }
+
+    function bindTips(root) {
+      (root || document).querySelectorAll("[data-tip]").forEach((el) => {
+        const tipEl = el.classList.contains("info-tip") ? el : el.querySelector(":scope > h2 .info-tip, :scope > h3 .info-tip, .info-tip");
+        if (tipEl && el.dataset.tip) tipEl.dataset.tip = el.dataset.tip;
+      });
+    }
 
     const palette = ["#0f6e56", "#243447", "#8a6414", "#8c2828", "#4d6b5c", "#6b5a4d", "#2f5d8a"];
 
@@ -243,7 +317,13 @@
       items.forEach(([label, value]) => {
         const card = document.createElement("div");
         card.className = "kpi-card";
-        card.innerHTML = `<p class="kpi-label">${label}</p><p class="kpi-value">${value}</p>`;
+        const labelEl = document.createElement("p");
+        labelEl.className = "kpi-label";
+        labelEl.append(label + " ", tipButton(kpiTips[label] || "Operational health metric for this agent."));
+        const valueEl = document.createElement("p");
+        valueEl.className = "kpi-value";
+        valueEl.textContent = value;
+        card.append(labelEl, valueEl);
         kpiEl.appendChild(card);
       });
     }
@@ -335,18 +415,22 @@
         || "Core evaluation triad: context relevance, answer faithfulness, answer relevance.";
       triadScoresEl.replaceChildren();
       [
-        ["Context relevance", scores.context_relevance, bands.context_relevance, "Query → retrieved docs"],
-        ["Answer faithfulness", scores.answer_faithfulness, bands.answer_faithfulness, "Context → answer"],
-        ["Answer relevance", scores.answer_relevance, bands.answer_relevance, "Query → answer"],
-      ].forEach(([label, score, band, edge]) => {
+        ["Context relevance", scores.context_relevance, bands.context_relevance, "Query → retrieved docs", "Are retrieved chunks useful for the question? Low means the generator reasons over noise."],
+        ["Answer faithfulness", scores.answer_faithfulness, bands.answer_faithfulness, "Context → answer", "Is the answer grounded in evidence (or an honest abstain)? Low means hallucination risk."],
+        ["Answer relevance", scores.answer_relevance, bands.answer_relevance, "Query → answer", "Does the final answer actually address what the user asked?"],
+      ].forEach(([label, score, band, edge, tip]) => {
         const card = document.createElement("div");
         card.className = "triad-card";
-        card.innerHTML = `
-          <p class="kpi-label">${label}</p>
-          <p class="kpi-value">${Math.round((score || 0) * 100)}%</p>
-          <p class="triad-edge">${edge}</p>
-          <span class="badge badge-${band === "high" ? "ok" : band === "low" ? "fail" : "warn"}">${band || "—"}</span>
-        `;
+        const labelEl = document.createElement("p");
+        labelEl.className = "kpi-label";
+        labelEl.append(label + " ", tipButton(tip));
+        const valueEl = document.createElement("p");
+        valueEl.className = "kpi-value";
+        valueEl.textContent = `${Math.round((score || 0) * 100)}%`;
+        const edgeEl = document.createElement("p");
+        edgeEl.className = "triad-edge";
+        edgeEl.textContent = edge;
+        card.append(labelEl, valueEl, edgeEl, badge(band || "—", band === "high" ? "ok" : band === "low" ? "fail" : "warn"));
         triadScoresEl.appendChild(card);
       });
 
@@ -452,6 +536,9 @@
         badge(caseItem.source || "?", "neutral"),
         badge(caseItem.expected_tool || "none", "neutral")
       );
+      if (caseItem.eval_focus) {
+        head.append(badge(String(caseItem.eval_focus).replaceAll("_", " "), "warn"));
+      }
       if (score != null) {
         head.append(badge(`${Math.round(score * 100)}% avg`, score >= 0.7 ? "ok" : score >= 0.45 ? "warn" : "fail"));
       }
@@ -497,6 +584,7 @@
       renderCharts(conv);
       renderRagTriage(conv);
       renderGoldenMetrics(golden);
+      bindTips(document);
 
       const summary = data.summary || {};
       summaryEl.textContent = `Failure rate ${Math.round((summary.failure_rate || 0) * 100)}% · avg turn ${summary.avg_duration_ms || 0} ms · avg tokens ${summary.avg_tokens || 0} · cost/request $${summary.cost_per_request || 0} · cost/success $${summary.cost_per_success || 0}`;

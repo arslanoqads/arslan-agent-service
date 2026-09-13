@@ -366,6 +366,14 @@ textarea:focus {
   font-weight: 500;
 }
 
+.session-ids {
+  margin: 0.35rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
 .trace-head p, .summary {
   margin: 0.35rem 0 0;
   color: var(--muted);

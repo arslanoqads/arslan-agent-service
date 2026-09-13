@@ -92,7 +92,7 @@ class EmailInput(BaseModel):
 
 @tool("send_resume_email", args_schema=EmailInput)
 def send_resume_email(user_email: str, note: str = "") -> str:
-    """Emails Arslan's resume PDF from his Gmail to the visitor. One send per chat."""
+    """Emails Arslan's resume PDF from his Gmail to the visitor. Up to 10 sends per session."""
     if os.getenv("ACTIONS_ENABLED", "1") == "0":
         return "Email and calendar actions are turned off."
     if looks_like_injection(current_user_message.get()) or looks_like_injection(note):
@@ -100,10 +100,8 @@ def send_resume_email(user_email: str, note: str = "") -> str:
     if not EMAIL_RE.match(user_email.strip()):
         return "Cannot send the resume. Provide a valid email address."
     blocked = note_tool_call("send_resume_email", user_email.strip().lower())
-    if blocked == "already_sent":
-        return "A resume email was already sent in this chat. One email per conversation."
     if blocked == "tool_cap":
-        return "This turn hit the tool call limit."
+        return "This session hit the tool call limit."
     blocked = mark_email_sent()
     if blocked:
         return blocked
@@ -136,6 +134,7 @@ class CalendarInput(BaseModel):
 def schedule_intro_call(visitor_email: str, start_time: str) -> str:
     """Books a fixed 30-minute intro call on Arslan's Google Calendar and emails an invite.
     Always use 30 minutes even if the visitor asked for a shorter or longer slot.
+    Up to 10 bookings per session.
     """
     if os.getenv("ACTIONS_ENABLED", "1") == "0":
         return "Email and calendar actions are turned off."
@@ -154,10 +153,8 @@ def schedule_intro_call(visitor_email: str, start_time: str) -> str:
     if slot_error:
         return slot_error
     blocked = note_tool_call("schedule_intro_call", f"{visitor_email.strip().lower()}|{start.isoformat()}")
-    if blocked == "already_sent":
-        return "An intro call was already booked in this chat. One meeting per conversation."
     if blocked == "tool_cap":
-        return "This turn hit the tool call limit."
+        return "This session hit the tool call limit."
     blocked = mark_calendar_booked()
     if blocked:
         return blocked

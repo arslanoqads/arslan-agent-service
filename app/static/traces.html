@@ -56,7 +56,12 @@
         button.className = "trace-row";
         const tokens = (trace.input_tokens || 0) + (trace.output_tokens || 0);
         const toolsUsed = (trace.tools || []).join(", ") || "no tools";
-        button.textContent = `${trace.started_at || ""} · ${trace.status} · ${trace.route || "unknown"} · ${trace.duration_ms ?? "—"} ms · ${trace.loop_count || 0} loops · ${tokens} tokens · ${toolsUsed} · ${(trace.question || "").slice(0, 80)}`;
+        const cache = trace.cache?.kind
+          ? (trace.cache.kind === "semantic" && trace.cache.similarity != null
+            ? `cache semantic ${trace.cache.similarity}`
+            : `cache ${trace.cache.kind}`)
+          : "no cache";
+        button.textContent = `${trace.started_at || ""} · ${trace.status} · ${trace.route || "unknown"} · ${cache} · ${trace.duration_ms ?? "—"} ms · ${trace.loop_count || 0} loops · ${tokens} tokens · ${toolsUsed} · ${(trace.question || "").slice(0, 80)}`;
         button.addEventListener("click", () => {
           detailEl.textContent = JSON.stringify(trace, null, 2);
         });

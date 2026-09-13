@@ -48,11 +48,21 @@
     budgetLegend.textContent = `Context ${used}/${windowSize} (${percent}%) · retrieved ${budget.retrieved || 0} · history ${budget.history || 0}${cut}`;
   }
 
+  function cacheLabel(cache) {
+    if (!cache || !cache.kind) return "";
+    if (cache.kind === "semantic" && cache.similarity != null) {
+      return ` · cache semantic (${cache.similarity})`;
+    }
+    return ` · cache ${cache.kind}`;
+  }
+
   function renderTrace(trace) {
     if (!trace || !traceSteps) return;
     const tokens = (trace.input_tokens || 0) + (trace.output_tokens || 0);
     const late = trace.spans?.some((span) => span.kind === "llm" && span.ttft_ms != null && span.ttft_ms > 8000);
-    traceSummary.textContent = `${trace.status || "running"} · ${trace.route || "unknown"} · ${trace.loop_count || 0} loops · ${tokens} tokens · ${trace.duration_ms ?? "—"} ms${late ? " · first token over budget" : ""}`;
+    const cache = cacheLabel(trace.cache);
+    const stop = trace.stop_reason ? ` · ${trace.stop_reason}` : "";
+    traceSummary.textContent = `${trace.status || "running"} · ${trace.route || "unknown"}${cache}${stop} · ${trace.loop_count || 0} loops · ${tokens} tokens · ${trace.duration_ms ?? "—"} ms${late ? " · first token over budget" : ""}`;
     renderBudget(trace.context_budget || {});
     traceSteps.replaceChildren();
     (trace.spans || []).forEach((span) => {
@@ -63,13 +73,17 @@
       traceSteps.appendChild(item);
     });
     if (toolStatus) {
-      toolStatus.textContent = (trace.tool_status || []).map((item) => `${item.name} ${item.status}`).join(" · ");
+      const tools = (trace.tool_status || []).map((item) => `${item.name} ${item.status}`).join(" · ");
+      const cacheNote = trace.cache?.kind
+        ? `cache ${trace.cache.kind}${trace.cache.kind === "semantic" && trace.cache.similarity != null ? ` ${trace.cache.similarity}` : ""}`
+        : "";
+      toolStatus.textContent = [tools, cacheNote].filter(Boolean).join(" · ");
     }
   }
 
   addMessage(
     "system",
-    "Try a suggestion below. Demo limit: 5 questions per visitor every 30 minutes."
+    "Start with one clear ask — resume Q&A, email delivery, a call time, JD match, or public links. Demo limit: 5 questions per visitor every 30 minutes."
   );
 
   suggestions?.addEventListener("click", (event) => {

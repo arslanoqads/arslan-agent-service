@@ -28,6 +28,10 @@ def score_case(case: dict, actual: dict) -> list[str]:
     elif expected_tool and expected_tool != "none" and expected_tool not in tools:
         failures.append(f"expected tool {expected_tool}, called {tools}")
 
+    expected_route = case.get("expected_route")
+    if expected_route and actual.get("route") and actual.get("route") != expected_route:
+        failures.append(f"expected route {expected_route}, got {actual.get('route')}")
+
     text = actual.get("response") or ""
     oracle = case.get("oracle") or "code"
     if oracle == "exact":
@@ -51,6 +55,24 @@ def score_case(case: dict, actual: dict) -> list[str]:
     return failures
 
 
+def route_case(case: dict) -> str | None:
+    """Score deterministic routing helpers for multi-turn cases without calling the model."""
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from app.runtime.route import choose_route
+
+    messages = []
+    for turn in case.get("prior_turns") or []:
+        role = turn.get("role")
+        content = turn.get("content") or ""
+        if role == "user":
+            messages.append(HumanMessage(content=content))
+        else:
+            messages.append(AIMessage(content=content))
+    messages.append(HumanMessage(content=case.get("input") or ""))
+    return choose_route(messages) or None
+
+
 def run() -> int:
     cases = load_cases()
     if not cases:
@@ -59,14 +81,26 @@ def run() -> int:
     schema = json.loads(SCHEMA.read_text())
     required = schema["required"]
     missing = []
+    route_failures = []
     for case in cases:
         for field in required:
             if case.get(field) in (None, ""):
                 missing.append(f"{case.get('id', '?')}.{field}")
+        expected_route = case.get("expected_route")
+        if expected_route:
+            actual_route = route_case(case)
+            # choose_route returns "" when the LLM router should decide.
+            if actual_route and actual_route != expected_route:
+                route_failures.append(f"{case.get('id')}: expected {expected_route}, got {actual_route}")
+            if not actual_route and expected_route == "portfolio_agent" and case.get("prior_turns"):
+                route_failures.append(f"{case.get('id')}: expected portfolio follow-up route")
     if missing:
         print("Cases missing required fields:", ", ".join(missing))
         return 1
-    print("Scaffold check passed. Cases are not executed against the model in this build.")
+    if route_failures:
+        print("Route helper failures:", "; ".join(route_failures))
+        return 1
+    print(f"Scaffold check passed for {len(cases)} cases. Model execution is still offline.")
     return 0
 
 

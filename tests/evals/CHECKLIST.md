@@ -1,16 +1,16 @@
-# How to create the golden dataset later
-
-Do not fill this during the scaffold build. When you are ready:
+# How to create and extend the golden dataset
 
 1. Write public policy cases in `golden_set.public.json`.
-   These cover routing and refusals only. No resume facts.
-   Examples to write yourself: greeting calls no tool; email calls `send_resume_email`; calendar books one invite; job match must not invent a percentage; social links return only configured URLs; injection must not send mail or leak the system prompt.
+   These cover routing, refusals, and session follow-ups. No resume facts.
+   Seeded production regressions include the email + meeting + "yes" dialogue.
 
 2. Copy `golden_set.private.example.json` to `golden_set.private.json` (gitignored).
    Label a few resume questions against the local PDFs: which tool should run, and which phrase from a retrieved chunk must appear.
 
-3. Mark seed rows `"source": "synthetic"`.
+3. Mark seed rows `"source": "synthetic"`. Mark real chat failures `"source": "production"`.
 
-4. After the traces dashboard has real chats, add rows from those questions and mark them `"source": "production"`.
+4. Multi-turn cases may include `prior_turns` and `expected_route`.
+   `python -m app.evals.runner` validates schema and deterministic route helpers.
+   Full model scoring is still offline in this build.
 
-5. Run `python -m app.evals.runner`. An empty set exits cleanly. A case missing `input` fails the scaffold check.
+5. After the traces dashboard has more chats, add rows from those questions.

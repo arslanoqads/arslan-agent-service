@@ -10,11 +10,25 @@
     "id": {"type": "string", "minLength": 1},
     "family": {"type": "string", "enum": ["POS", "NEAR", "NEG"]},
     "input": {"type": "string", "minLength": 1},
+    "prior_turns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "content"],
+        "properties": {
+          "role": {"type": "string", "enum": ["user", "assistant"]},
+          "content": {"type": "string"}
+        }
+      }
+    },
     "expected_tool": {"type": "string"},
+    "expected_route": {"type": "string", "enum": ["portfolio_agent", "general_responder"]},
     "must_include": {"type": "array", "items": {"type": "string"}},
     "must_not_include": {"type": "array", "items": {"type": "string"}},
     "oracle": {"type": "string", "enum": ["code", "regex", "exact"]},
     "severity": {"type": "string", "enum": ["blocker", "major"]},
-    "source": {"type": "string", "enum": ["synthetic", "production"]}
+    "source": {"type": "string", "enum": ["synthetic", "production"]},
+    "notes": {"type": "string"}
   }
 }

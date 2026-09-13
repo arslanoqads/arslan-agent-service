@@ -31,7 +31,13 @@ def normalize_question(text: str) -> str:
 def cacheable(text: str) -> bool:
     if looks_like_injection(text):
         return False
-    lowered = (text or "").lower()
+    cleaned = normalize_question(text)
+    if not cleaned or len(cleaned) < 12:
+        return False
+    # Short confirmations and follow-ups are session-bound, never global cache keys.
+    if cleaned in {"yes", "yep", "yeah", "y", "ok", "okay", "sure", "please", "proceed", "go ahead", "do it", "book it", "confirm"}:
+        return False
+    lowered = cleaned
     return not any(marker in lowered for marker in ACTION_MARKERS)
 
 

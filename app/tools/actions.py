@@ -122,7 +122,9 @@ class CalendarInput(BaseModel):
 
 @tool("schedule_intro_call", args_schema=CalendarInput)
 def schedule_intro_call(visitor_email: str, start_time: str) -> str:
-    """Books a 30-minute intro call on Arslan's Google Calendar and emails an invite."""
+    """Books a fixed 30-minute intro call on Arslan's Google Calendar and emails an invite.
+    Always use 30 minutes even if the visitor asked for a shorter or longer slot.
+    """
     if os.getenv("ACTIONS_ENABLED", "1") == "0":
         return "Email and calendar actions are turned off."
     if looks_like_injection(current_user_message.get()) or looks_like_injection(start_time):

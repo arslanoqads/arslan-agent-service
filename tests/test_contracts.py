@@ -790,6 +790,144 @@ def test_conversation_metrics_sessions_and_tools():
     assert metrics["rag"]["triad"]["playbook"]
     assert metrics["ttft"]["samples"] == 2
     assert metrics["sessions"][0]["tokens"] == 43
+    biz = metrics["business"]
+    assert biz["primary"] == "resume_or_appointment"
+    assert biz["converted_sessions"] == 1
+    assert biz["resume_sessions"] == 1
+    assert biz["appointment_sessions"] == 0
+    assert biz["conversion_rate"] == 1.0
+    assert biz["successful_tool_mix"]["send_resume_email"]["sessions"] == 1
+    assert biz["successful_tool_mix"]["query_arslan_profile"]["sessions"] == 1
+    assert biz["successful_tool_mix"]["schedule_intro_call"]["sessions"] == 0
+
+
+def test_business_metrics_why_not_converted_and_budget():
+    from app.observability.store import conversation_metrics
+
+    traces = [
+        # Converted via appointment
+        {
+            "id": "c1",
+            "thread_id": "converted",
+            "status": "ok",
+            "duration_ms": 500,
+            "loop_count": 1,
+            "attempt": 1,
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_usd": 0.01,
+            "tools": ["schedule_intro_call"],
+            "tool_status": [{"name": "schedule_intro_call", "status": "ok"}],
+            "stop_reason": "completed",
+            "spans": [],
+            "context_budget": {},
+        },
+        # Hit 5-message budget, never converted
+        {
+            "id": "b1",
+            "thread_id": "budget",
+            "status": "ok",
+            "duration_ms": 200,
+            "loop_count": 0,
+            "attempt": 1,
+            "input_tokens": 5,
+            "output_tokens": 2,
+            "cost_usd": 0.001,
+            "tools": [],
+            "tool_status": [],
+            "stop_reason": "budget",
+            "error_kind": "guardrail",
+            "spans": [],
+            "context_budget": {},
+        },
+        # Tool failure on resume attempt
+        {
+            "id": "f1",
+            "thread_id": "fail",
+            "status": "error",
+            "duration_ms": 800,
+            "loop_count": 1,
+            "attempt": 1,
+            "input_tokens": 12,
+            "output_tokens": 4,
+            "cost_usd": 0.002,
+            "tools": ["send_resume_email"],
+            "tool_status": [{"name": "send_resume_email", "status": "error"}],
+            "stop_reason": "tool_error",
+            "spans": [],
+            "context_budget": {},
+        },
+        # Slow browse-only (non-convert)
+        {
+            "id": "s1",
+            "thread_id": "slow",
+            "status": "ok",
+            "duration_ms": 5000,
+            "loop_count": 1,
+            "attempt": 1,
+            "input_tokens": 20,
+            "output_tokens": 10,
+            "cost_usd": 0.003,
+            "tools": ["query_arslan_profile"],
+            "tool_status": [{"name": "query_arslan_profile", "status": "ok"}],
+            "stop_reason": "completed",
+            "spans": [],
+            "context_budget": {"retrieved": 20},
+            "rag_triage": {"retrieval_ok": True, "scores": {"context_relevance": 0.9, "answer_faithfulness": 0.9, "answer_relevance": 0.9}},
+        },
+        # Weak RAG non-convert
+        {
+            "id": "r1",
+            "thread_id": "rag",
+            "status": "ok",
+            "duration_ms": 900,
+            "loop_count": 1,
+            "attempt": 1,
+            "input_tokens": 20,
+            "output_tokens": 10,
+            "cost_usd": 0.003,
+            "tools": ["query_arslan_profile"],
+            "tool_status": [{"name": "query_arslan_profile", "status": "ok"}],
+            "stop_reason": "completed",
+            "spans": [],
+            "context_budget": {"retrieved": 12, "cut": ["retrieved"]},
+            "rag_triage": {
+                "retrieval_ok": False,
+                "scores": {"context_relevance": 0.2, "answer_faithfulness": 0.3, "answer_relevance": 0.3},
+            },
+        },
+        # Clean browse-only
+        {
+            "id": "o1",
+            "thread_id": "browse",
+            "status": "ok",
+            "duration_ms": 400,
+            "loop_count": 1,
+            "attempt": 1,
+            "input_tokens": 8,
+            "output_tokens": 4,
+            "cost_usd": 0.001,
+            "tools": ["get_social_links"],
+            "tool_status": [{"name": "get_social_links", "status": "ok"}],
+            "stop_reason": "completed",
+            "spans": [],
+            "context_budget": {},
+        },
+    ]
+    biz = conversation_metrics(traces)["business"]
+    assert biz["sessions"] == 6
+    assert biz["converted_sessions"] == 1
+    assert biz["non_converted_sessions"] == 5
+    assert biz["conversion_rate"] == round(1 / 6, 3)
+    assert biz["hit_message_budget_sessions"] == 1
+    assert biz["why_not_converted"]["hit_message_budget"] == 1
+    assert biz["why_not_converted"]["tool_failure"] == 1
+    assert biz["why_not_converted"]["slow_latency"] == 1
+    assert biz["why_not_converted"]["rag_weak"] == 1
+    assert biz["why_not_converted"]["browse_only"] == 1
+    assert biz["successful_tool_mix"]["schedule_intro_call"]["sessions"] == 1
+    assert biz["successful_tool_mix"]["get_social_links"]["sessions"] == 1
+    assert biz["avg_successful_tools_per_session"] > 0
 
 
 def test_rag_golden_triad_scores_by_focus():

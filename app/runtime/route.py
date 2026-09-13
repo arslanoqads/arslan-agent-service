@@ -21,4 +21,18 @@ def is_links_request(text: str) -> bool:
 
 def is_provider_failure(detail: str) -> bool:
     text = (detail or "").lower()
-    return "429" in text or "timeout" in text or "rate limit" in text or "unavailable" in text
+    return any(
+        needle in text
+        for needle in (
+            "429",
+            "timeout",
+            "timed out",
+            "rate limit",
+            "unavailable",
+            "error code: 500",
+            "error code: 502",
+            "error code: 503",
+            "service unavailable",
+            "connection error",
+        )
+    )

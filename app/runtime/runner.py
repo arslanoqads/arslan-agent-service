@@ -12,6 +12,7 @@ from app.observability.cost import classify_error, estimate_usd
 from app.observability.model import close_span, new_span, new_trace, persisted_trace, public_trace, span_kind
 from app.observability.store import get_store
 from app.rag.corpus import corpus_fingerprint
+from app.runtime.errors import public_error_message
 from app.runtime.route import DEGRADED_MESSAGE, TOKEN_CEILING_MESSAGE, is_greeting, is_links_request, is_provider_failure
 from app.tools.actions import format_social_links
 from app.tools.limits import current_thread_id, current_user_message
@@ -327,26 +328,28 @@ async def stream_turn(message: str, thread_id: str):
         save_trace(trace)
         yield {"type": "done", "response": answer, "trace": public_trace(trace), "trace_id": trace["id"]}
     except Exception as exc:
-        if is_provider_failure(str(exc)):
-            trace["stop_reason"] = "fallback"
-            trace["error_kind"] = "provider"
-            yield complete_short(
-                trace,
-                started=started,
-                name="fallback",
-                kind="guardrail",
-                output=DEGRADED_MESSAGE,
-                stop_reason="fallback",
-                route="portfolio",
-            )
-            return
+        detail = str(exc)
+        friendly = public_error_message(detail)
         for span in open_spans.values():
-            close_span(span, ended_perf=time.perf_counter(), error=str(exc))
-        trace["error_kind"] = classify_error(str(exc))
-        trace["stop_reason"] = trace.get("stop_reason") or "tool_error"
-        finish_trace(trace, status="error", started=started, error=str(exc))
+            close_span(span, ended_perf=time.perf_counter(), error=detail)
+        if is_provider_failure(detail):
+            stop_reason = "fallback"
+            error_kind = "provider"
+        else:
+            stop_reason = "tool_error"
+            error_kind = classify_error(detail)
+        trace["stop_reason"] = stop_reason
+        trace["error_kind"] = error_kind
+        trace["route"] = trace.get("route") or "portfolio"
+        finish_trace(trace, status="error", started=started, error=detail)
         save_trace(trace)
-        yield {"type": "error", "detail": str(exc), "trace": public_trace(trace)}
+        # Visitors get a calm reply; the private trace keeps the raw error.
+        yield {
+            "type": "done",
+            "response": friendly,
+            "trace": public_trace(trace),
+            "trace_id": trace["id"],
+        }
     finally:
         current_thread_id.reset(thread_token)
         current_user_message.reset(message_token)

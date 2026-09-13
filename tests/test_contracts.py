@@ -283,6 +283,18 @@ def test_exact_and_semantic_cache_skip_actions():
     assert lookup("What is his background?", "next", embed) is None
 
 
+def test_public_error_message_hides_openai_dump():
+    from app.runtime.errors import MESSAGE_SHAPE_MESSAGE, public_error_message
+
+    raw = (
+        "Error code: 400 - {'error': {'message': \"Invalid parameter: messages with role "
+        "'tool' must be a response to a preceeding message with 'tool_calls'.\"}}"
+    )
+    assert public_error_message(raw) == MESSAGE_SHAPE_MESSAGE
+    assert "Error code" not in public_error_message(raw)
+    assert "{" not in public_error_message("Traceback (most recent call last)")
+
+
 def test_prepare_model_messages_keeps_tool_pairs():
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 

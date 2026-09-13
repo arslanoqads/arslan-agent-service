@@ -11,6 +11,7 @@ import app.config.settings  # Load .env and validate OPENAI_API_KEY before graph
 from app.guardrails import BUDGET_LIMIT_MESSAGE, consume_question, release_question
 from app.observability.model import public_trace
 from app.observability.store import get_store, summary
+from app.runtime.errors import public_error_message
 from app.runtime.runner import record_guardrail, stream_turn
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -78,12 +79,25 @@ async def run_chat(query: ChatQuery, request: Request):
         return
     try:
         async for event in stream_turn(query.message, query.thread_id):
-            yield event
             if event.get("type") == "error":
                 release_question(ip)
-    except Exception:
+                friendly = public_error_message(event.get("detail") or "")
+                yield {
+                    "type": "done",
+                    "response": friendly,
+                    "trace": event.get("trace"),
+                    "trace_id": event.get("trace_id"),
+                }
+                return
+            yield event
+    except Exception as exc:
         release_question(ip)
-        raise
+        yield {
+            "type": "done",
+            "response": public_error_message(str(exc)),
+            "trace": None,
+            "trace_id": None,
+        }
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -92,8 +106,14 @@ async def chat_endpoint(query: ChatQuery, request: Request):
     async for event in run_chat(query, request):
         if event["type"] in {"done", "error"}:
             final = event
-    if not final or final["type"] == "error":
-        raise HTTPException(status_code=500, detail=(final or {}).get("detail", "Chat failed"))
+    if not final:
+        raise HTTPException(status_code=500, detail="Chat failed")
+    if final["type"] == "error":
+        return ChatResponse(
+            response=public_error_message(final.get("detail") or ""),
+            thread_id=query.thread_id,
+            trace=final.get("trace"),
+        )
     return ChatResponse(response=final["response"], thread_id=query.thread_id, trace=final.get("trace"))
 
 

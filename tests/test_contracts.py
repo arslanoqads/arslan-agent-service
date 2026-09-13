@@ -494,6 +494,124 @@ def test_composite_store_keeps_failed_traces(tmp_path, monkeypatch):
     listed = store.list_traces()
     assert listed[0]["id"] == "fail-1"
     assert listed[0]["outcome"] == "tool_error"
+    status = store.persistence_status()
+    assert "Boom" in status["last_errors"]
+
+
+def test_composite_store_dual_write_survives_one_backend_failure(tmp_path):
+    from app.observability.store import CompositeTraceStore, MemoryTraceStore, SqliteTraceStore
+
+    class Boom:
+        def save(self, trace):
+            raise RuntimeError("boom")
+
+        def get(self, trace_id):
+            return None
+
+        def list_traces(self, limit=50):
+            return []
+
+    sqlite = SqliteTraceStore(str(tmp_path / "ok.sqlite"))
+    store = CompositeTraceStore([Boom(), sqlite], MemoryTraceStore())
+    trace = {
+        "id": "keep-1",
+        "started_at": "2026-09-13T21:00:00+00:00",
+        "status": "ok",
+        "outcome": "success",
+        "tools": [],
+        "spans": [],
+    }
+    store.save(trace)
+    assert store.get("keep-1")["id"] == "keep-1"
+    assert any(item["id"] == "keep-1" for item in store.list_traces())
+    assert store.persistence_status()["last_errors"]["Boom"]
+
+
+def test_golden_store_merges_durable_cases(tmp_path, monkeypatch):
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    monkeypatch.delenv("RAG_GCS_BUCKET", raising=False)
+    monkeypatch.delenv("TRACE_BACKEND", raising=False)
+    import app.evals.durable as durable
+    import app.evals.runner as runner
+
+    durable._store = durable.CompositeGoldenStore([])
+    durable.get_golden_store().save(
+        {
+            "id": "prod-extra-1",
+            "family": "POS",
+            "severity": "major",
+            "source": "production",
+            "input": "extra case",
+            "expected_tool": "none",
+            "oracle": "code",
+        }
+    )
+    cases = runner.load_public_cases()
+    assert any(case.get("id") == "prod-extra-1" for case in cases)
+    assert len(cases) >= 2
+
+
+def test_golden_metrics_by_category_and_over_time():
+    from app.evals.metrics import aggregate_golden_metrics
+
+    cases = [
+        {
+            "id": "email-case",
+            "family": "POS",
+            "severity": "blocker",
+            "source": "production",
+            "input": "send me your resume at [redacted-email]",
+            "expected_tool": "send_resume_email",
+            "oracle": "code",
+        },
+        {
+            "id": "near-yes",
+            "family": "NEAR",
+            "severity": "major",
+            "source": "synthetic",
+            "input": "yes",
+            "expected_tool": "schedule_intro_call",
+            "expected_route": "portfolio_agent",
+            "oracle": "code",
+        },
+    ]
+    traces = [
+        {
+            "id": "t1",
+            "question": "send me your resume at [redacted-email]",
+            "tools": ["send_resume_email"],
+            "route": "portfolio",
+            "outcome": "success",
+            "started_at": "2026-09-10T12:00:00+00:00",
+        },
+        {
+            "id": "t2",
+            "question": "send me your resume at [redacted-email]",
+            "tools": [],
+            "route": "portfolio",
+            "outcome": "processing_error",
+            "started_at": "2026-09-11T12:00:00+00:00",
+        },
+        {
+            "id": "t3",
+            "question": "yes",
+            "tools": ["schedule_intro_call"],
+            "route": "portfolio",
+            "outcome": "success",
+            "started_at": "2026-09-11T15:00:00+00:00",
+        },
+    ]
+    metrics = aggregate_golden_metrics(cases, traces)
+    assert metrics["samples"] == 3
+    assert "POS" in metrics["by_family"]
+    assert "NEAR" in metrics["by_family"]
+    assert "blocker" in metrics["by_severity"]
+    assert "production" in metrics["by_source"]
+    assert "send_resume_email" in metrics["by_expected_tool"]
+    assert len(metrics["over_time"]) == 2
+    assert metrics["over_time"][0]["date"] == "2026-09-10"
+    assert metrics["by_family"]["POS"]["n"] == 2
+    assert metrics["overall_avg"] > 0
 
 
 def test_public_golden_set_endpoint(monkeypatch, tmp_path):
@@ -512,6 +630,9 @@ def test_public_golden_set_endpoint(monkeypatch, tmp_path):
     assert data["summary"]["count"] >= 1
     first = data["cases"][0]
     assert {"id", "family", "severity", "source", "expected_tool"} <= set(first.keys())
+    assert "metrics" in data
+    assert "by_family" in data["metrics"]
+    assert "over_time" in data["metrics"]
     dumped = str(data)
     assert "@gmail.com" not in dumped
     assert "arslanoqads@" not in dumped

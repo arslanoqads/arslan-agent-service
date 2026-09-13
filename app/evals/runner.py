@@ -4,14 +4,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 APP_ROOT = Path(__file__).resolve().parent
+# Prefer the image-shipped copy under app/evals (Dockerfile does not copy tests/).
 PUBLIC_SET_CANDIDATES = (
-    ROOT / "tests" / "evals" / "golden_set.public.json",
     APP_ROOT / "golden_set.public.json",
+    ROOT / "tests" / "evals" / "golden_set.public.json",
 )
 PRIVATE_SET = ROOT / "tests" / "evals" / "golden_set.private.json"
 SCHEMA_CANDIDATES = (
-    ROOT / "tests" / "evals" / "schema.json",
     APP_ROOT / "schema.json",
+    ROOT / "tests" / "evals" / "schema.json",
 )
 
 
@@ -35,11 +36,35 @@ def load_cases() -> list[dict]:
 
 
 def load_public_cases() -> list[dict]:
+    """Packaged public cases plus any durable production extras."""
+    packaged: list[dict] = []
     path = _first_existing(PUBLIC_SET_CANDIDATES)
-    if path is None:
-        return []
-    data = json.loads(path.read_text())
-    return data if isinstance(data, list) else []
+    if path is not None:
+        data = json.loads(path.read_text())
+        if isinstance(data, list):
+            packaged = data
+    merged: dict[str, dict] = {case.get("id"): case for case in packaged if case.get("id")}
+    try:
+        from app.evals.durable import get_golden_store
+
+        for case in get_golden_store().list_cases():
+            case_id = case.get("id")
+            if case_id:
+                merged[case_id] = case
+    except Exception:
+        pass
+    # Preserve packaged order, then durable-only extras.
+    ordered = []
+    seen = set()
+    for case in packaged:
+        case_id = case.get("id")
+        if case_id and case_id in merged and case_id not in seen:
+            ordered.append(merged[case_id])
+            seen.add(case_id)
+    for case_id, case in merged.items():
+        if case_id not in seen:
+            ordered.append(case)
+    return ordered
 
 
 def public_case(case: dict) -> dict:

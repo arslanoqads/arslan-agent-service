@@ -16,9 +16,11 @@ from app.guardrails import (
     enforce_limit,
     release_question,
 )
+from app.evals.durable import get_golden_store
+from app.evals.metrics import aggregate_golden_metrics, match_scores
 from app.evals.runner import load_public_cases, public_case
 from app.observability.model import public_question, public_trace
-from app.observability.store import classify_outcome, get_store, summary
+from app.observability.store import DEFAULT_LIST_LIMIT, classify_outcome, get_store, summary
 from app.runtime.errors import public_error_message
 from app.runtime.runner import record_guardrail, stream_turn
 
@@ -151,7 +153,7 @@ async def chat_stream(query: ChatQuery, request: Request):
 @app.get("/observability/traces")
 def list_traces():
     try:
-        raw = _store.list_traces() or []
+        raw = _store.list_traces(DEFAULT_LIST_LIMIT) or []
     except Exception:
         raw = []
     traces = []
@@ -165,10 +167,17 @@ def list_traces():
         except Exception:
             continue
     backend = getattr(_store, "backend", type(_store).__name__)
+    persistence = {}
+    if hasattr(_store, "persistence_status"):
+        try:
+            persistence = _store.persistence_status()
+        except Exception:
+            persistence = {}
     return {
         "traces": traces,
         "summary": summary(traces),
         "backend": backend,
+        "persistence": persistence,
         "privacy": (
             "Public showcase view. Emails, phones, resume text, tool arguments, "
             "and raw errors are removed. Failed tool turns are listed with outcome=tool_error."
@@ -178,7 +187,8 @@ def list_traces():
 
 @app.get("/observability/golden-set")
 def list_golden_set():
-    cases = [public_case(case) for case in load_public_cases()]
+    raw_cases = load_public_cases()
+    cases = [public_case(case) for case in raw_cases]
     families = {}
     severities = {}
     sources = {}
@@ -186,6 +196,27 @@ def list_golden_set():
         families[case["family"]] = families.get(case["family"], 0) + 1
         severities[case["severity"]] = severities.get(case["severity"], 0) + 1
         sources[case["source"]] = sources.get(case["source"], 0) + 1
+    persistence = {}
+    durable_scores = []
+    try:
+        store = get_golden_store()
+        persistence = store.persistence_status()
+        durable_scores = store.list_scores()
+    except Exception:
+        persistence = {}
+    try:
+        traces = _store.list_traces(DEFAULT_LIST_LIMIT) or []
+    except Exception:
+        traces = []
+    metrics = aggregate_golden_metrics(raw_cases, traces, durable_scores)
+    # Attach per-case avg onto the public list for the UI badges.
+    score_by_id = {row["id"]: row for row in metrics.get("case_scores") or []}
+    for case in cases:
+        row = score_by_id.get(case.get("id") or "")
+        if row:
+            case["avg_score"] = row.get("avg_score")
+            case["score_n"] = row.get("n")
+            case["pass_rate"] = row.get("pass_rate")
     return {
         "cases": cases,
         "summary": {
@@ -194,6 +225,8 @@ def list_golden_set():
             "severities": severities,
             "sources": sources,
         },
+        "metrics": metrics,
+        "persistence": persistence,
     }
 
 
@@ -216,25 +249,30 @@ def save_eval_stub(trace_id: str, request: Request):
     trace = _store.get(trace_id)
     if not trace:
         raise HTTPException(status_code=404, detail="Trace not found")
+    case = {
+        "id": f"trace-{trace_id[:8]}",
+        "family": "POS",
+        "input": public_question(trace.get("question") or ""),
+        "expected_tool": "none",
+        "tools_called": trace.get("tools") or [],
+        "must_include": [],
+        "must_not_include": [],
+        "oracle": "code",
+        "severity": "major",
+        "source": "production",
+        "stop_reason": trace.get("stop_reason"),
+    }
+    # Durable first — Cloud Run container disk is ephemeral and tests/ is not in the image.
+    get_golden_store().save(case)
     path = Path("tests/evals/golden_set.private.json")
-    cases = []
-    if path.exists():
-        cases = json.loads(path.read_text())
-    cases.append(
-        {
-            "id": f"trace-{trace_id[:8]}",
-            "family": "POS",
-            "input": public_question(trace.get("question") or ""),
-            "expected_tool": "none",
-            "tools_called": trace.get("tools") or [],
-            "must_include": [],
-            "must_not_include": [],
-            "oracle": "code",
-            "severity": "major",
-            "source": "production",
-            "stop_reason": trace.get("stop_reason"),
-        }
-    )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(cases, indent=2) + "\n")
-    return {"saved": str(path), "id": cases[-1]["id"]}
+    try:
+        cases = []
+        if path.exists():
+            cases = json.loads(path.read_text())
+        cases = [item for item in cases if item.get("id") != case["id"]]
+        cases.append(case)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(cases, indent=2) + "\n")
+    except Exception:
+        pass
+    return {"ok": True, "case": public_case(case)}

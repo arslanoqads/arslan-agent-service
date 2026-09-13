@@ -80,10 +80,59 @@ class FirestoreThreadStore:
         return list(data.get("turns") or [])
 
     def save(self, thread_id: str, turns: list[dict]) -> None:
+        self.collection.document(thread_id).set({"turns": list(turns[-MAX_TURNS:])})
+
+
+class GcsThreadStore:
+    PREFIX = "observability/threads"
+
+    def __init__(self, bucket_name: str | None = None):
+        from google.cloud import storage
+
+        self.bucket_name = bucket_name or os.getenv("RAG_GCS_BUCKET")
+        if not self.bucket_name:
+            raise RuntimeError("RAG_GCS_BUCKET is required for GCS thread archive")
+        self.client = storage.Client()
+        self.bucket = self.client.bucket(self.bucket_name)
+
+    def load(self, thread_id: str) -> list[dict]:
+        blob = self.bucket.blob(f"{self.PREFIX}/{thread_id}.json")
         try:
-            self.collection.document(thread_id).set({"turns": list(turns[-MAX_TURNS:])})
+            if not blob.exists():
+                return []
+            data = json.loads(blob.download_as_text())
         except Exception:
-            return
+            return []
+        return list((data or {}).get("turns") or [])
+
+    def save(self, thread_id: str, turns: list[dict]) -> None:
+        payload = json.dumps({"turns": list(turns[-MAX_TURNS:])})
+        self.bucket.blob(f"{self.PREFIX}/{thread_id}.json").upload_from_string(
+            payload,
+            content_type="application/json",
+        )
+
+
+class CompositeThreadStore:
+    def __init__(self, durables: list):
+        self.durables = durables or []
+
+    def load(self, thread_id: str) -> list[dict]:
+        for backend in self.durables:
+            try:
+                turns = backend.load(thread_id)
+            except Exception:
+                continue
+            if turns:
+                return turns
+        return []
+
+    def save(self, thread_id: str, turns: list[dict]) -> None:
+        for backend in self.durables:
+            try:
+                backend.save(thread_id, turns)
+            except Exception:
+                continue
 
 
 _store = None
@@ -95,13 +144,22 @@ def get_thread_store():
     if _store is not None:
         return _store
     if os.getenv("K_SERVICE") or os.getenv("TRACE_BACKEND") == "firestore":
+        durables = []
         try:
-            _store = FirestoreThreadStore()
-            return _store
+            durables.append(FirestoreThreadStore())
         except Exception:
-            path = os.getenv("TRACE_SQLITE_PATH", "/tmp/traces.sqlite")
-            _store = SqliteThreadStore(path.replace("traces.sqlite", "threads.sqlite"))
+            pass
+        if os.getenv("RAG_GCS_BUCKET"):
+            try:
+                durables.append(GcsThreadStore())
+            except Exception:
+                pass
+        if durables:
+            _store = CompositeThreadStore(durables)
             return _store
+        path = os.getenv("TRACE_SQLITE_PATH", "/tmp/traces.sqlite")
+        _store = SqliteThreadStore(path.replace("traces.sqlite", "threads.sqlite"))
+        return _store
     path = os.getenv("THREAD_SQLITE_PATH") or os.getenv("TRACE_SQLITE_PATH", "data/traces.sqlite")
     if path.endswith("traces.sqlite"):
         path = path.replace("traces.sqlite", "threads.sqlite")

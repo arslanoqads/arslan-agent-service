@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sqlite3
 from pathlib import Path
@@ -6,11 +7,16 @@ from threading import Lock
 
 from app.observability.rag_triad import aggregate_triad
 
+logger = logging.getLogger(__name__)
+
+DEFAULT_LIST_LIMIT = 200
+MEMORY_LIMIT = 500
+
 
 class MemoryTraceStore:
     """Process-local ring buffer so recent (including failed) traces stay listable."""
 
-    def __init__(self, limit: int = 200):
+    def __init__(self, limit: int = MEMORY_LIMIT):
         self.limit = limit
         self._lock = Lock()
         self._items: dict[str, dict] = {}
@@ -34,7 +40,7 @@ class MemoryTraceStore:
             item = self._items.get(trace_id)
             return dict(item) if item else None
 
-    def list_traces(self, limit: int = 50) -> list[dict]:
+    def list_traces(self, limit: int = DEFAULT_LIST_LIMIT) -> list[dict]:
         with self._lock:
             ids = list(reversed(self._order))[:limit]
             return [dict(self._items[trace_id]) for trace_id in ids if trace_id in self._items]
@@ -72,7 +78,7 @@ class SqliteTraceStore:
             row = conn.execute("SELECT payload FROM traces WHERE id = ?", (trace_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def list_traces(self, limit: int = 50) -> list[dict]:
+    def list_traces(self, limit: int = DEFAULT_LIST_LIMIT) -> list[dict]:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
                 "SELECT payload FROM traces ORDER BY started_at DESC LIMIT ?",
@@ -89,18 +95,8 @@ class FirestoreTraceStore:
         self.collection = self.client.collection("agent_traces")
 
     def save(self, trace: dict) -> None:
-        payload = dict(trace)
-        for key in ("started_at", "ended_at"):
-            value = payload.get(key)
-            if value is not None and not isinstance(value, str) and hasattr(value, "isoformat"):
-                payload[key] = value.isoformat()
-        for span in payload.get("spans") or []:
-            for key in ("started_at", "ended_at"):
-                value = span.get(key)
-                if value is not None and not isinstance(value, str) and hasattr(value, "isoformat"):
-                    span[key] = value.isoformat()
-        # Drop non-JSON-safe leftovers before write.
-        self.collection.document(trace["id"]).set(json.loads(json.dumps(payload, default=str)))
+        payload = _json_safe(trace)
+        self.collection.document(trace["id"]).set(payload)
 
     def get(self, trace_id: str) -> dict | None:
         try:
@@ -109,11 +105,21 @@ class FirestoreTraceStore:
             return None
         return snap.to_dict() if snap.exists else None
 
-    def list_traces(self, limit: int = 50) -> list[dict]:
+    def list_traces(self, limit: int = DEFAULT_LIST_LIMIT) -> list[dict]:
         try:
-            docs = list(self.collection.limit(max(limit, 100)).stream())
+            from google.cloud import firestore
+
+            docs = list(
+                self.collection.order_by("started_at", direction=firestore.Query.DESCENDING)
+                .limit(limit)
+                .stream()
+            )
         except Exception:
-            return []
+            # Fallback when the started_at index is missing or order_by fails.
+            try:
+                docs = list(self.collection.limit(max(limit, 100)).stream())
+            except Exception:
+                return []
         items = []
         for doc in docs:
             data = doc.to_dict() or {}
@@ -124,52 +130,171 @@ class FirestoreTraceStore:
         return items[:limit]
 
 
-class CompositeTraceStore:
-    """Always write memory; also write durable backend when available."""
+class GcsTraceStore:
+    """Durable JSON archive in the private RAG bucket — survives Cloud Run redeploys."""
 
-    def __init__(self, durable, memory: MemoryTraceStore | None = None):
-        self.durable = durable
-        self.memory = memory or MemoryTraceStore()
-        self.backend = type(durable).__name__
+    PREFIX = "observability/traces"
+
+    def __init__(self, bucket_name: str | None = None):
+        from google.cloud import storage
+
+        self.bucket_name = bucket_name or os.getenv("RAG_GCS_BUCKET")
+        if not self.bucket_name:
+            raise RuntimeError("RAG_GCS_BUCKET is required for GCS trace archive")
+        self.client = storage.Client()
+        self.bucket = self.client.bucket(self.bucket_name)
+
+    def _blob(self, trace_id: str):
+        return self.bucket.blob(f"{self.PREFIX}/{trace_id}.json")
 
     def save(self, trace: dict) -> None:
-        self.memory.save(trace)
-        try:
-            self.durable.save(trace)
-        except Exception:
-            return
+        payload = _json_safe(trace)
+        self._blob(trace["id"]).upload_from_string(
+            json.dumps(payload),
+            content_type="application/json",
+        )
 
     def get(self, trace_id: str) -> dict | None:
+        blob = self._blob(trace_id)
         try:
-            found = self.durable.get(trace_id)
-            if found:
-                return found
+            if not blob.exists():
+                return None
+            return json.loads(blob.download_as_text())
         except Exception:
-            pass
-        return self.memory.get(trace_id)
+            return None
 
-    def list_traces(self, limit: int = 50) -> list[dict]:
-        durable_items: list[dict] = []
+    def list_traces(self, limit: int = DEFAULT_LIST_LIMIT) -> list[dict]:
+        items = []
         try:
-            durable_items = self.durable.list_traces(limit) or []
+            blobs = self.client.list_blobs(self.bucket_name, prefix=f"{self.PREFIX}/")
+            for blob in blobs:
+                if not blob.name.endswith(".json"):
+                    continue
+                try:
+                    data = json.loads(blob.download_as_text())
+                except Exception:
+                    continue
+                if isinstance(data, dict):
+                    if not data.get("id"):
+                        data["id"] = Path(blob.name).stem
+                    items.append(data)
         except Exception:
-            durable_items = []
-        memory_items = self.memory.list_traces(limit)
-        merged: dict[str, dict] = {}
-        for item in durable_items + memory_items:
-            trace_id = item.get("id")
-            if not trace_id:
-                continue
-            existing = merged.get(trace_id)
-            if not existing or (item.get("started_at") or "") >= (existing.get("started_at") or ""):
-                merged[trace_id] = item
-        items = list(merged.values())
+            return []
         items.sort(key=lambda item: item.get("started_at") or "", reverse=True)
         return items[:limit]
 
 
+class CompositeTraceStore:
+    """Memory plus one or more durable backends. Never drop a save just because one backend fails."""
+
+    def __init__(self, durables: list, memory: MemoryTraceStore | None = None):
+        if not isinstance(durables, list):
+            durables = [durables]
+        self.durables = [item for item in durables if item is not None]
+        self.memory = memory or MemoryTraceStore()
+        self.backend = "+".join(type(item).__name__ for item in self.durables) or "MemoryTraceStore"
+        self.last_errors: dict[str, str] = {}
+        self.write_counts: dict[str, int] = {type(item).__name__: 0 for item in self.durables}
+        self.write_counts["MemoryTraceStore"] = 0
+
+    @property
+    def durable(self):
+        return self.durables[0] if self.durables else None
+
+    @durable.setter
+    def durable(self, value) -> None:
+        # Tests replace a single durable backend.
+        self.durables = [value]
+        self.backend = type(value).__name__
+        self.write_counts[type(value).__name__] = self.write_counts.get(type(value).__name__, 0)
+
+    def save(self, trace: dict) -> None:
+        self.memory.save(trace)
+        self.write_counts["MemoryTraceStore"] = self.write_counts.get("MemoryTraceStore", 0) + 1
+        for backend in self.durables:
+            name = type(backend).__name__
+            try:
+                backend.save(trace)
+                self.write_counts[name] = self.write_counts.get(name, 0) + 1
+                self.last_errors.pop(name, None)
+            except Exception as exc:
+                self.last_errors[name] = str(exc)
+                logger.warning("trace durable save failed backend=%s error=%s", name, exc)
+
+    def get(self, trace_id: str) -> dict | None:
+        for backend in self.durables:
+            try:
+                found = backend.get(trace_id)
+                if found:
+                    return found
+            except Exception as exc:
+                self.last_errors[type(backend).__name__] = str(exc)
+        return self.memory.get(trace_id)
+
+    def list_traces(self, limit: int = DEFAULT_LIST_LIMIT) -> list[dict]:
+        merged: dict[str, dict] = {}
+        for backend in list(self.durables) + [self.memory]:
+            name = type(backend).__name__
+            try:
+                items = backend.list_traces(limit) or []
+            except Exception as exc:
+                self.last_errors[name] = str(exc)
+                logger.warning("trace list failed backend=%s error=%s", name, exc)
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                trace_id = item.get("id")
+                if not trace_id:
+                    continue
+                existing = merged.get(trace_id)
+                if not existing or (item.get("started_at") or "") >= (existing.get("started_at") or ""):
+                    merged[trace_id] = item
+        items = list(merged.values())
+        items.sort(key=lambda item: item.get("started_at") or "", reverse=True)
+        return items[:limit]
+
+    def persistence_status(self) -> dict:
+        return {
+            "backend": self.backend,
+            "durable_backends": [type(item).__name__ for item in self.durables],
+            "write_counts": dict(self.write_counts),
+            "last_errors": dict(self.last_errors),
+            "ok": not self.last_errors,
+        }
+
+
+def _json_safe(trace: dict) -> dict:
+    payload = dict(trace)
+    for key in ("started_at", "ended_at"):
+        value = payload.get(key)
+        if value is not None and not isinstance(value, str) and hasattr(value, "isoformat"):
+            payload[key] = value.isoformat()
+    for span in payload.get("spans") or []:
+        for key in ("started_at", "ended_at"):
+            value = span.get(key)
+            if value is not None and not isinstance(value, str) and hasattr(value, "isoformat"):
+                span[key] = value.isoformat()
+    return json.loads(json.dumps(payload, default=str))
+
+
 _store = None
 _memory = MemoryTraceStore()
+
+
+def _build_cloud_durables() -> list:
+    durables = []
+    try:
+        durables.append(FirestoreTraceStore())
+    except Exception as exc:
+        logger.warning("firestore trace store unavailable: %s", exc)
+    bucket = os.getenv("RAG_GCS_BUCKET")
+    if bucket:
+        try:
+            durables.append(GcsTraceStore(bucket))
+        except Exception as exc:
+            logger.warning("gcs trace archive unavailable: %s", exc)
+    return durables
 
 
 def get_store():
@@ -177,15 +302,26 @@ def get_store():
     if _store is not None:
         return _store
     if os.getenv("K_SERVICE") or os.getenv("TRACE_BACKEND") == "firestore":
-        try:
-            _store = CompositeTraceStore(FirestoreTraceStore(), _memory)
+        durables = _build_cloud_durables()
+        if durables:
+            _store = CompositeTraceStore(durables, _memory)
             return _store
-        except Exception:
-            durable = SqliteTraceStore(os.getenv("TRACE_SQLITE_PATH", "/tmp/traces.sqlite"))
-            _store = CompositeTraceStore(durable, _memory)
-            return _store
+        # Last resort on Cloud Run — still better than memory-only, but /tmp is ephemeral.
+        durable = SqliteTraceStore(os.getenv("TRACE_SQLITE_PATH", "/tmp/traces.sqlite"))
+        _store = CompositeTraceStore([durable], _memory)
+        return _store
+    if os.getenv("TRACE_BACKEND") == "sqlite" or os.getenv("TRACE_SQLITE_PATH"):
+        path = os.getenv("TRACE_SQLITE_PATH", "data/traces.sqlite")
+        _store = CompositeTraceStore([SqliteTraceStore(path)], _memory)
+        return _store
     path = os.getenv("TRACE_SQLITE_PATH", "data/traces.sqlite")
-    _store = CompositeTraceStore(SqliteTraceStore(path), _memory)
+    durables: list = [SqliteTraceStore(path)]
+    if os.getenv("RAG_GCS_BUCKET"):
+        try:
+            durables.append(GcsTraceStore())
+        except Exception:
+            pass
+    _store = CompositeTraceStore(durables, _memory)
     return _store
 
 
@@ -220,8 +356,6 @@ def classify_outcome(trace: dict) -> str:
         return "tool_error"
     if "refused" in tool_statuses:
         return "tool_refused"
-    if trace.get("status") == "running":
-        return "running"
     return "success"
 
 

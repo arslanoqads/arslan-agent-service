@@ -782,7 +782,8 @@ def test_conversation_metrics_sessions_and_tools():
     assert metrics["tools_per_session"]["3+"] == 1
     assert metrics["totals"]["tool_failures"] == 1
     assert metrics["rag"]["retrieval_turns"] == 1
-    assert metrics["rag"]["triad"]["samples"] == 1
+    assert metrics["rag"]["triad"]["method"] == "rag_golden_set"
+    assert metrics["rag"]["triad"]["proxy_samples"] == 1
     assert "context_relevance" in metrics["rag"]["triad"]["scores"]
     assert "answer_faithfulness" in metrics["rag"]["triad"]["scores"]
     assert "answer_relevance" in metrics["rag"]["triad"]["scores"]
@@ -791,7 +792,99 @@ def test_conversation_metrics_sessions_and_tools():
     assert metrics["sessions"][0]["tokens"] == 43
 
 
-def test_rag_triad_proxy_scores_citations_and_abstain():
+def test_rag_golden_triad_scores_by_focus():
+    from app.observability.rag_triad import aggregate_rag_golden_triad
+
+    cases = [
+        {
+            "id": "rag-context-relevance-products",
+            "family": "POS",
+            "input": "What AI products has Arslan shipped?",
+            "expected_tool": "query_arslan_profile",
+            "eval_focus": "context_relevance",
+            "oracle": "code",
+            "severity": "major",
+            "source": "synthetic",
+        },
+        {
+            "id": "rag-faithfulness-abstain-phone",
+            "family": "NEG",
+            "input": "What is Arslan's private phone number?",
+            "expected_tool": "query_arslan_profile",
+            "eval_focus": "answer_faithfulness",
+            "oracle": "code",
+            "severity": "blocker",
+            "source": "synthetic",
+        },
+        {
+            "id": "rag-answer-relevance-jd",
+            "family": "POS",
+            "input": "Compare this role to the resume: AI product manager who ships agents.",
+            "expected_tool": "match_role_evidence",
+            "eval_focus": "answer_relevance",
+            "oracle": "code",
+            "severity": "major",
+            "source": "synthetic",
+        },
+    ]
+    traces = [
+        {
+            "id": "t-ctx",
+            "question": "What AI products has Arslan shipped?",
+            "tools": ["query_arslan_profile"],
+            "tool_status": [{"name": "query_arslan_profile", "status": "ok"}],
+            "outcome": "success",
+            "started_at": "2026-09-12T12:00:00+00:00",
+            "rag_triage": {
+                "retrieval_ok": True,
+                "retrieved_tokens": 100,
+                "context_cut": False,
+                "has_citation": True,
+                "abstained": False,
+                "scores": {"context_relevance": 0.95, "answer_faithfulness": 0.8, "answer_relevance": 0.85},
+            },
+        },
+        {
+            "id": "t-faith",
+            "question": "What is Arslan's private phone number?",
+            "tools": ["query_arslan_profile"],
+            "tool_status": [{"name": "query_arslan_profile", "status": "ok"}],
+            "outcome": "success",
+            "started_at": "2026-09-12T13:00:00+00:00",
+            "rag_triage": {
+                "retrieval_ok": True,
+                "retrieved_tokens": 40,
+                "context_cut": False,
+                "has_citation": False,
+                "abstained": True,
+                "scores": {"context_relevance": 0.6, "answer_faithfulness": 0.55, "answer_relevance": 0.7},
+            },
+        },
+        {
+            "id": "t-rel",
+            "question": "Compare this role to the resume: AI product manager who ships agents.",
+            "tools": ["match_role_evidence"],
+            "tool_status": [{"name": "match_role_evidence", "status": "ok"}],
+            "outcome": "success",
+            "started_at": "2026-09-12T14:00:00+00:00",
+            "rag_triage": {
+                "retrieval_ok": True,
+                "retrieved_tokens": 90,
+                "context_cut": False,
+                "has_citation": True,
+                "abstained": False,
+                "multi_hop": False,
+                "scores": {"context_relevance": 0.8, "answer_faithfulness": 0.8, "answer_relevance": 0.9},
+            },
+        },
+    ]
+    result = aggregate_rag_golden_triad(cases, traces)
+    assert result["method"] == "rag_golden_set"
+    assert result["cases_scored"] == 3
+    assert result["scores"]["context_relevance"] > 0.7
+    assert result["scores"]["answer_faithfulness"] > 0.7
+    assert result["scores"]["answer_relevance"] > 0.7
+    assert "playbook_explained" in result
     from app.observability.rag_triad import annotate_rag_triage, diagnose, score_turn
 
     cited = score_turn(

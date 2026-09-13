@@ -271,7 +271,7 @@ def fallback_signals(trace: dict) -> dict | None:
 
 
 def aggregate_triad(traces: list[dict]) -> dict:
-    """Roll retrieval turns into triad averages + playbook for the dashboard."""
+    """Legacy proxy rollup over all retrieval turns (kept for citation/abstain rates)."""
     turns = []
     for trace in traces:
         signals = fallback_signals(trace)
@@ -288,7 +288,7 @@ def aggregate_triad(traces: list[dict]) -> dict:
     }
     return {
         "method": "proxy",
-        "note": "Proxy scores from retrieval traces (citations, abstains, cuts, outcomes). Replace with LLM-judge/human labels for golden-set gates.",
+        "note": "Operational proxies from retrieval turns. Prefer golden-set triad scores in the RAG triage panel.",
         "scores": scores,
         "bands": {key: _band(value) for key, value in scores.items()},
         "diagnosis": diagnose(scores) if turns else {"code": "—", "label": "No retrieval turns yet", "bands": {}},
@@ -298,4 +298,170 @@ def aggregate_triad(traces: list[dict]) -> dict:
         "citation_rate": _avg([1.0 if t.get("has_citation") else 0.0 for t in turns]),
         "abstain_rate": _avg([1.0 if t.get("abstained") else 0.0 for t in turns]),
         "multi_hop_rate": _avg([1.0 if t.get("multi_hop") else 0.0 for t in turns]),
+    }
+
+
+FOCUS_KEYS = ("context_relevance", "answer_faithfulness", "answer_relevance")
+
+
+def score_rag_golden_case(case: dict, trace: dict) -> dict:
+    """Score one RAG golden case against a matched production/demo trace."""
+    from app.evals.metrics import score_trace_against_case
+
+    focus = case.get("eval_focus") or "contract"
+    contract = score_trace_against_case(case, trace)
+    signals = fallback_signals(trace) or {}
+    triad_scores = (signals.get("scores") or score_turn(signals)) if signals else {
+        "context_relevance": 0.0,
+        "answer_faithfulness": 0.0,
+        "answer_relevance": 0.0,
+    }
+
+    # Dimension-specific expectations from the RAG golden label.
+    if focus == "context_relevance":
+        dim = float(triad_scores.get("context_relevance") or 0)
+        if signals.get("retrieval_ok") and int(signals.get("retrieved_tokens") or 0) >= 20:
+            dim = max(dim, 0.7)
+        if signals.get("context_cut"):
+            dim = min(dim, 0.45)
+    elif focus == "answer_faithfulness":
+        if case.get("family") == "NEG" or "abstain" in (case.get("id") or ""):
+            dim = 1.0 if signals.get("abstained") else 0.15
+        elif "citation" in (case.get("id") or "") or "citations" in (case.get("input") or "").lower():
+            dim = 1.0 if signals.get("has_citation") else float(triad_scores.get("answer_faithfulness") or 0) * 0.4
+        else:
+            dim = float(triad_scores.get("answer_faithfulness") or 0)
+    elif focus == "answer_relevance":
+        dim = float(triad_scores.get("answer_relevance") or 0)
+        if contract.get("passed"):
+            dim = max(dim, 0.75)
+        else:
+            dim = min(dim, 0.4)
+    else:
+        dim = float(contract.get("score") or 0)
+
+    # Blend contract correctness with the focused triad dimension.
+    score = round(0.4 * float(contract.get("score") or 0) + 0.6 * dim, 3)
+    return {
+        "case_id": case.get("id"),
+        "focus": focus,
+        "score": score,
+        "passed": score >= 0.7 and bool(contract.get("passed")),
+        "family": case.get("family"),
+        "severity": case.get("severity"),
+        "source": case.get("source"),
+        "input": case.get("input"),
+        "notes": case.get("notes"),
+        "trace_id": trace.get("id"),
+        "started_at": trace.get("started_at"),
+        "day": (trace.get("started_at") or "")[:10],
+    }
+
+
+def aggregate_rag_golden_triad(
+    cases: list[dict],
+    traces: list[dict],
+    durable_points: list[dict] | None = None,
+) -> dict:
+    """Score the triad against RAG golden cases (eval_focus = triad edge)."""
+    from app.evals.metrics import prompts_match
+
+    rag_cases = [
+        case
+        for case in cases
+        if (case.get("eval_focus") or "") in FOCUS_KEYS
+    ]
+    # Match latest trace per case (prefer live traces, then durable score points).
+    case_results: dict[str, dict] = {}
+    for case in rag_cases:
+        best = None
+        for trace in traces:
+            if not prompts_match(case.get("input") or "", trace.get("question") or ""):
+                continue
+            point = score_rag_golden_case(case, trace)
+            if not best or (point.get("started_at") or "") >= (best.get("started_at") or ""):
+                best = point
+        if best:
+            case_results[case["id"]] = best
+
+    # Durable points may already encode RAG scores with focus.
+    for point in durable_points or []:
+        case_id = point.get("case_id")
+        focus = point.get("focus") or point.get("eval_focus")
+        if not case_id or focus not in FOCUS_KEYS:
+            continue
+        existing = case_results.get(case_id)
+        if not existing or (point.get("started_at") or "") >= (existing.get("started_at") or ""):
+            case_results[case_id] = {
+                "case_id": case_id,
+                "focus": focus,
+                "score": float(point.get("score") or 0),
+                "passed": bool(point.get("passed")),
+                "family": point.get("family"),
+                "severity": point.get("severity"),
+                "source": point.get("source"),
+                "input": point.get("input"),
+                "notes": point.get("notes"),
+                "trace_id": point.get("trace_id"),
+                "started_at": point.get("started_at"),
+                "day": point.get("day") or (point.get("started_at") or "")[:10],
+            }
+
+    # Fill unmatched labeled cases as unscored placeholders (count in coverage).
+    for case in rag_cases:
+        if case["id"] in case_results:
+            continue
+        case_results[case["id"]] = {
+            "case_id": case["id"],
+            "focus": case.get("eval_focus"),
+            "score": None,
+            "passed": False,
+            "family": case.get("family"),
+            "severity": case.get("severity"),
+            "source": case.get("source"),
+            "input": case.get("input"),
+            "notes": case.get("notes"),
+            "trace_id": None,
+            "started_at": None,
+            "day": None,
+            "unscored": True,
+        }
+
+    by_focus: dict[str, list[float]] = {key: [] for key in FOCUS_KEYS}
+    scored_cases = []
+    for row in case_results.values():
+        scored_cases.append(row)
+        if row.get("score") is None:
+            continue
+        focus = row.get("focus")
+        if focus in by_focus:
+            by_focus[focus].append(float(row["score"]))
+
+    scores = {key: _avg(vals) for key, vals in by_focus.items()}
+    return {
+        "method": "rag_golden_set",
+        "note": (
+            "The three scores are averages over the RAG golden set: labeled cases for "
+            "context relevance, faithfulness, and answer relevance. Match production/demo "
+            "traces to those prompts, then score the focused triad edge."
+        ),
+        "scores": scores,
+        "bands": {key: _band(value) for key, value in scores.items()},
+        "diagnosis": diagnose(scores) if any(by_focus.values()) else {
+            "code": "—",
+            "label": "No scored RAG golden cases yet",
+            "bands": {},
+        },
+        "patterns": DIAGNOSIS_PATTERNS,
+        "playbook": PLAYBOOK,
+        "playbook_explained": (
+            "Not a score. When a triad metric is weak, these are the engineering fixes to try "
+            "(hybrid search, rewrite, CoVe, abstain, citations, role prompts, multi-step). "
+            "Status shows what this product already ships."
+        ),
+        "cases": sorted(scored_cases, key=lambda row: (row.get("focus") or "", row.get("case_id") or "")),
+        "cases_total": len(rag_cases),
+        "cases_scored": sum(1 for row in scored_cases if row.get("score") is not None),
+        "samples": sum(len(vals) for vals in by_focus.values()),
+        "by_focus_n": {key: len(vals) for key, vals in by_focus.items()},
     }

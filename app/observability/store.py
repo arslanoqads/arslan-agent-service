@@ -223,23 +223,187 @@ def classify_outcome(trace: dict) -> str:
     return "success"
 
 
+def _avg(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), 2)
+
+
+def _percentile(values: list[float], pct: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, int(round((pct / 100) * (len(ordered) - 1)))))
+    return round(ordered[index], 2)
+
+
+def _ttfts(trace: dict) -> list[float]:
+    values = []
+    for span in trace.get("spans") or []:
+        if span.get("kind") == "llm" and span.get("ttft_ms") is not None:
+            values.append(float(span["ttft_ms"]))
+    return values
+
+
+def conversation_metrics(traces: list[dict]) -> dict:
+    """Session-aware dashboard metrics for the observability page."""
+    finished = [item for item in traces if item.get("status") != "running"]
+    sessions: dict[str, list[dict]] = {}
+    for item in finished:
+        key = item.get("thread_id") or item.get("id") or "unknown"
+        sessions.setdefault(key, []).append(item)
+
+    tool_count_hist = {"0": 0, "1": 0, "2": 0, "3+": 0}
+    session_rows = []
+    tool_failures = {}
+    outcomes = {}
+    latencies = []
+    loops = []
+    retries = []
+    ttfts = []
+    input_tokens = []
+    output_tokens = []
+    costs = []
+    rag_calls = 0
+    rag_retrieved = []
+    rag_cuts = 0
+    turns_with_retrieval = 0
+
+    for session_id, turns in sessions.items():
+        tools_unique = set()
+        tool_calls = 0
+        failed_tools = 0
+        session_in = 0
+        session_out = 0
+        session_cost = 0.0
+        session_latency = 0
+        session_loops = 0
+        session_retries = 0
+        session_ttft = []
+        for turn in turns:
+            names = turn.get("tools") or []
+            tools_unique.update(names)
+            tool_calls += len(names)
+            for status in turn.get("tool_status") or []:
+                if status.get("status") == "error":
+                    failed_tools += 1
+                    tool_name = status.get("name") or "unknown"
+                    tool_failures[tool_name] = tool_failures.get(tool_name, 0) + 1
+            outcome = classify_outcome(turn)
+            outcomes[outcome] = outcomes.get(outcome, 0) + 1
+            latencies.append(float(turn.get("duration_ms") or 0))
+            loops.append(float(turn.get("loop_count") or 0))
+            attempt = float(turn.get("attempt") or 0)
+            retries.append(max(0.0, attempt - 1))
+            session_retries += max(0, int(attempt) - 1)
+            session_latency += int(turn.get("duration_ms") or 0)
+            session_loops += int(turn.get("loop_count") or 0)
+            session_in += int(turn.get("input_tokens") or 0)
+            session_out += int(turn.get("output_tokens") or 0)
+            session_cost += float(turn.get("cost_usd") or 0)
+            input_tokens.append(float(turn.get("input_tokens") or 0))
+            output_tokens.append(float(turn.get("output_tokens") or 0))
+            costs.append(float(turn.get("cost_usd") or 0))
+            ttft_vals = _ttfts(turn)
+            ttfts.extend(ttft_vals)
+            session_ttft.extend(ttft_vals)
+            budget = turn.get("context_budget") or {}
+            retrieval_tools = {"query_arslan_profile", "match_role_evidence"}
+            if retrieval_tools.intersection(names):
+                rag_calls += 1
+                turns_with_retrieval += 1
+                rag_retrieved.append(float(budget.get("retrieved") or 0))
+                if budget.get("cut"):
+                    rag_cuts += 1
+        count_key = str(len(tools_unique)) if len(tools_unique) < 3 else "3+"
+        if count_key not in tool_count_hist:
+            count_key = "3+"
+        tool_count_hist[count_key] = tool_count_hist.get(count_key, 0) + 1
+        session_rows.append(
+            {
+                "thread_id": session_id,
+                "turns": len(turns),
+                "tools_unique": len(tools_unique),
+                "tool_calls": tool_calls,
+                "tool_failures": failed_tools,
+                "input_tokens": session_in,
+                "output_tokens": session_out,
+                "tokens": session_in + session_out,
+                "cost_usd": round(session_cost, 6),
+                "latency_ms": session_latency,
+                "loops": session_loops,
+                "retries": session_retries,
+                "avg_ttft_ms": _avg(session_ttft),
+            }
+        )
+
+    session_rows.sort(key=lambda row: row.get("cost_usd") or 0, reverse=True)
+    return {
+        "totals": {
+            "sessions": len(sessions),
+            "turns": len(finished),
+            "tool_failures": sum(tool_failures.values()),
+            "input_tokens": int(sum(input_tokens)),
+            "output_tokens": int(sum(output_tokens)),
+            "tokens": int(sum(input_tokens) + sum(output_tokens)),
+            "cost_usd": round(sum(costs), 6),
+        },
+        "tools_per_session": tool_count_hist,
+        "outcomes": outcomes,
+        "tool_failures": tool_failures,
+        "latency": {
+            "avg_ms": _avg(latencies),
+            "p50_ms": _percentile(latencies, 50),
+            "p95_ms": _percentile(latencies, 95),
+        },
+        "ttft": {
+            "avg_ms": _avg(ttfts),
+            "p50_ms": _percentile(ttfts, 50),
+            "p95_ms": _percentile(ttfts, 95),
+            "samples": len(ttfts),
+        },
+        "loops": {"avg": _avg(loops), "p95": _percentile(loops, 95)},
+        "retries": {"avg": _avg(retries), "total": int(sum(retries))},
+        "tokens": {
+            "avg_input": _avg(input_tokens),
+            "avg_output": _avg(output_tokens),
+            "avg_total": _avg([a + b for a, b in zip(input_tokens, output_tokens)]) if finished else 0,
+        },
+        "cost": {
+            "avg_per_turn": _avg(costs),
+            "avg_per_session": _avg([row["cost_usd"] for row in session_rows]),
+            "total": round(sum(costs), 6),
+        },
+        "rag": {
+            "retrieval_turns": turns_with_retrieval,
+            "retrieval_rate": round(turns_with_retrieval / len(finished), 3) if finished else 0,
+            "avg_retrieved_tokens": _avg(rag_retrieved),
+            "context_cut_rate": round(rag_cuts / turns_with_retrieval, 3) if turns_with_retrieval else 0,
+            "rag_tool_calls": rag_calls,
+        },
+        "sessions": session_rows[:50],
+    }
+
+
 def summary(traces: list[dict]) -> dict:
     finished = [item for item in traces if item.get("status") != "running"]
     count = len(finished)
+    empty = {
+        "requests": 0,
+        "avg_duration_ms": 0,
+        "avg_tokens": 0,
+        "failure_rate": 0,
+        "tools": {},
+        "error_kinds": {},
+        "stop_reasons": {},
+        "outcomes": {},
+        "cost_per_request": 0,
+        "cost_per_success": 0,
+        "unknown_routes": 0,
+        "conversation": conversation_metrics([]),
+    }
     if not count:
-        return {
-            "requests": 0,
-            "avg_duration_ms": 0,
-            "avg_tokens": 0,
-            "failure_rate": 0,
-            "tools": {},
-            "error_kinds": {},
-            "stop_reasons": {},
-            "outcomes": {},
-            "cost_per_request": 0,
-            "cost_per_success": 0,
-            "unknown_routes": 0,
-        }
+        return empty
     durations = [item.get("duration_ms") or 0 for item in finished]
     tokens = [
         (item.get("input_tokens") or 0) + (item.get("output_tokens") or 0) for item in finished
@@ -267,4 +431,5 @@ def summary(traces: list[dict]) -> dict:
         "cost_per_request": round(sum(item.get("cost_usd") or 0 for item in finished) / count, 6),
         "cost_per_success": _per_success(finished),
         "unknown_routes": sum(1 for item in finished if (item.get("route") or "unknown") == "unknown"),
+        "conversation": conversation_metrics(finished),
     }

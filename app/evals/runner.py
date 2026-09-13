@@ -44,6 +44,8 @@ def load_public_cases() -> list[dict]:
 
 def public_case(case: dict) -> dict:
     """Fields safe to show on the public observability page."""
+    from app.observability.model import public_question, redact
+
     return {
         "id": case.get("id"),
         "family": case.get("family"),
@@ -52,11 +54,19 @@ def public_case(case: dict) -> dict:
         "oracle": case.get("oracle"),
         "expected_tool": case.get("expected_tool"),
         "expected_route": case.get("expected_route"),
-        "input": case.get("input"),
-        "prior_turns": case.get("prior_turns") or [],
-        "must_include": case.get("must_include") or [],
-        "must_not_include": case.get("must_not_include") or [],
-        "notes": case.get("notes") or "",
+        "input": public_question(case.get("input") or ""),
+        "prior_turns": [
+            {
+                "role": turn.get("role"),
+                "content": public_question(turn.get("content") or "")
+                if turn.get("role") == "user"
+                else redact(turn.get("content") or ""),
+            }
+            for turn in (case.get("prior_turns") or [])
+        ],
+        "must_include": [redact(item) for item in (case.get("must_include") or [])],
+        "must_not_include": [redact(item) for item in (case.get("must_not_include") or [])],
+        "notes": redact(case.get("notes") or ""),
     }
 
 

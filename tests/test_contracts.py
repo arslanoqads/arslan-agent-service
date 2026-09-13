@@ -477,6 +477,58 @@ def test_public_golden_set_endpoint(monkeypatch, tmp_path):
     assert data["summary"]["count"] >= 1
     first = data["cases"][0]
     assert {"id", "family", "severity", "source", "expected_tool"} <= set(first.keys())
+    dumped = str(data)
+    assert "@gmail.com" not in dumped
+    assert "arslanoqads@" not in dumped
+
+
+def test_conversation_metrics_sessions_and_tools():
+    from app.observability.store import conversation_metrics
+
+    traces = [
+        {
+            "id": "t1",
+            "thread_id": "s1",
+            "status": "ok",
+            "outcome": "success",
+            "duration_ms": 100,
+            "loop_count": 1,
+            "attempt": 2,
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cost_usd": 0.01,
+            "tools": ["send_resume_email"],
+            "tool_status": [{"name": "send_resume_email", "status": "ok"}],
+            "spans": [{"kind": "llm", "ttft_ms": 120}],
+            "context_budget": {},
+        },
+        {
+            "id": "t2",
+            "thread_id": "s1",
+            "status": "error",
+            "outcome": "tool_error",
+            "duration_ms": 200,
+            "loop_count": 2,
+            "attempt": 1,
+            "input_tokens": 20,
+            "output_tokens": 8,
+            "cost_usd": 0.02,
+            "tools": ["query_arslan_profile", "schedule_intro_call"],
+            "tool_status": [
+                {"name": "query_arslan_profile", "status": "ok"},
+                {"name": "schedule_intro_call", "status": "error"},
+            ],
+            "spans": [{"kind": "llm", "ttft_ms": 80}],
+            "context_budget": {"retrieved": 40, "cut": ["history"]},
+        },
+    ]
+    metrics = conversation_metrics(traces)
+    assert metrics["totals"]["sessions"] == 1
+    assert metrics["tools_per_session"]["3+"] == 1
+    assert metrics["totals"]["tool_failures"] == 1
+    assert metrics["rag"]["retrieval_turns"] == 1
+    assert metrics["ttft"]["samples"] == 2
+    assert metrics["sessions"][0]["tokens"] == 43
 
 
 def test_public_error_message_hides_openai_dump():

@@ -138,10 +138,12 @@ def test_calendar_books_one_thirty_minute_invite_with_fixed_title(monkeypatch):
 
 
 def test_calendar_refuses_weekend_and_second_booking(monkeypatch):
-    monday = datetime(2026, 9, 14, 10, 0, tzinfo=ET)
-    assert validate_slot(monday) is None
-    saturday = datetime(2026, 9, 12, 10, 0, tzinfo=ET)
-    assert "weekdays" in validate_slot(saturday)
+    future_monday = (datetime.now(ET) + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+    while future_monday.weekday() != 0:
+        future_monday += timedelta(days=1)
+    assert validate_slot(future_monday) is None
+    future_saturday = future_monday + timedelta(days=5)
+    assert "weekdays" in validate_slot(future_saturday)
 
     monkeypatch.setattr(
         "app.tools.actions.create_calendar_event",

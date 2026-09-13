@@ -149,7 +149,18 @@ async def chat_stream(query: ChatQuery, request: Request):
 
 @app.get("/observability/traces")
 def list_traces():
-    traces = [public_trace(item) for item in _store.list_traces()]
+    try:
+        raw = _store.list_traces() or []
+    except Exception:
+        raw = []
+    traces = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            traces.append(public_trace(item))
+        except Exception:
+            continue
     return {
         "traces": traces,
         "summary": summary(traces),
@@ -162,7 +173,10 @@ def list_traces():
 
 @app.get("/observability/traces/{trace_id}")
 def get_trace(trace_id: str):
-    trace = _store.get(trace_id)
+    try:
+        trace = _store.get(trace_id)
+    except Exception:
+        trace = None
     if not trace:
         raise HTTPException(status_code=404, detail="Trace not found")
     return public_trace(trace)

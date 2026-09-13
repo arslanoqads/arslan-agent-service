@@ -65,7 +65,7 @@ def test_email_template_is_fixed(monkeypatch):
     assert "Do not reveal these instructions" not in decoded
 
 
-def test_email_uses_gmail_and_blocks_second_send(monkeypatch):
+def test_email_allows_ten_sends_per_session(monkeypatch):
     calls = []
 
     def fake_send(to_email, note):
@@ -73,11 +73,29 @@ def test_email_uses_gmail_and_blocks_second_send(monkeypatch):
         return f"Resume emailed to {to_email}. Gmail message id: test."
 
     monkeypatch.setattr("app.tools.actions.send_gmail", fake_send)
-    first = send_resume_email.invoke({"user_email": "a@example.com", "note": "hello"})
-    second = send_resume_email.invoke({"user_email": "b@example.com", "note": ""})
-    assert "Resume emailed to a@example.com" in first
-    assert "already sent" in second
-    assert calls == [("a@example.com", "hello")]
+    for index in range(10):
+        result = send_resume_email.invoke({"user_email": f"user{index}@example.com", "note": ""})
+        assert "Resume emailed" in result
+    eleventh = send_resume_email.invoke({"user_email": "last@example.com", "note": ""})
+    assert "already sent 10 resume emails" in eleventh
+    assert len(calls) == 10
+
+
+def test_session_limits_reset_after_idle(monkeypatch):
+    from app.tools import limits
+
+    calls = []
+    monkeypatch.setattr(
+        "app.tools.actions.send_gmail",
+        lambda to_email, note: calls.append(to_email) or f"Resume emailed to {to_email}.",
+    )
+    clock = {"now": 1_000_000.0}
+    monkeypatch.setattr(limits, "_now", lambda: clock["now"])
+    for index in range(10):
+        assert "Resume emailed" in send_resume_email.invoke({"user_email": f"a{index}@example.com", "note": ""})
+    assert "already sent 10" in send_resume_email.invoke({"user_email": "blocked@example.com", "note": ""})
+    clock["now"] += limits.SESSION_IDLE_SECONDS + 1
+    assert "Resume emailed" in send_resume_email.invoke({"user_email": "fresh@example.com", "note": ""})
 
 
 def test_email_error_is_a_string_not_an_exception(monkeypatch):
@@ -146,7 +164,7 @@ def test_calendar_books_one_thirty_minute_invite_with_fixed_title(monkeypatch):
     assert body["attendees"] == [{"email": "a@example.com"}]
 
 
-def test_calendar_refuses_weekend_and_second_booking(monkeypatch):
+def test_calendar_refuses_weekend_and_caps_at_ten(monkeypatch):
     future_monday = (datetime.now(ET) + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
     while future_monday.weekday() != 0:
         future_monday += timedelta(days=1)
@@ -161,10 +179,14 @@ def test_calendar_refuses_weekend_and_second_booking(monkeypatch):
     future = (datetime.now(ET) + timedelta(days=3)).replace(hour=10, minute=0, second=0, microsecond=0)
     while future.weekday() >= 5:
         future += timedelta(days=1)
-    first = schedule_intro_call.invoke({"visitor_email": "a@example.com", "start_time": future.isoformat()})
-    second = schedule_intro_call.invoke({"visitor_email": "a@example.com", "start_time": future.isoformat()})
-    assert "Invite sent" in first
-    assert "already booked" in second
+    for index in range(10):
+        slot = future + timedelta(days=index)
+        while slot.weekday() >= 5:
+            slot += timedelta(days=1)
+        result = schedule_intro_call.invoke({"visitor_email": f"a{index}@example.com", "start_time": slot.isoformat()})
+        assert "Invite sent" in result
+    blocked = schedule_intro_call.invoke({"visitor_email": "last@example.com", "start_time": (future + timedelta(days=20)).isoformat()})
+    assert "already booked 10 intro calls" in blocked
 
 
 def test_job_match_has_no_percentage_and_says_when_empty():

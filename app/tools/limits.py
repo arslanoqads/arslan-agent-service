@@ -1,4 +1,5 @@
 import re
+import time
 from contextvars import ContextVar
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -6,52 +7,86 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 current_thread_id: ContextVar[str] = ContextVar("current_thread_id", default="default_session")
 current_user_message: ContextVar[str] = ContextVar("current_user_message", default="")
 
-_email_sent: set[str] = set()
-_calendar_booked: set[str] = set()
-_tool_calls: dict[str, list[str]] = {}
-MAX_TOOL_CALLS = 4
+MAX_EMAILS_PER_SESSION = 10
+MAX_CALENDAR_PER_SESSION = 10
+SESSION_IDLE_SECONDS = 15 * 60
+MAX_TOOL_CALLS = 40
+
+# thread_id -> {emails, calendars, last_active, signatures}
+_sessions: dict[str, dict] = {}
+_now = time.time
 
 
 def thread_key() -> str:
     return current_thread_id.get()
 
 
-def mark_email_sent(thread_id: str | None = None) -> str | None:
+def _session(thread_id: str | None = None) -> dict:
     key = thread_id or thread_key()
-    if key in _email_sent:
-        return "A resume email was already sent in this chat. One email per conversation."
-    _email_sent.add(key)
+    now = _now()
+    state = _sessions.get(key)
+    if state is None or (now - float(state.get("last_active") or 0)) > SESSION_IDLE_SECONDS:
+        state = {"emails": 0, "calendars": 0, "last_active": now, "signatures": []}
+        _sessions[key] = state
+    else:
+        state["last_active"] = now
+    return state
+
+
+def touch_session(thread_id: str | None = None) -> None:
+    _session(thread_id)
+
+
+def mark_email_sent(thread_id: str | None = None) -> str | None:
+    state = _session(thread_id)
+    if state["emails"] >= MAX_EMAILS_PER_SESSION:
+        return (
+            f"This session already sent {MAX_EMAILS_PER_SESSION} resume emails. "
+            f"Session action limits reset after {SESSION_IDLE_SECONDS // 60} minutes of inactivity."
+        )
+    state["emails"] += 1
     return None
 
 
 def mark_calendar_booked(thread_id: str | None = None) -> str | None:
-    key = thread_id or thread_key()
-    if key in _calendar_booked:
-        return "An intro call was already booked in this chat. One meeting per conversation."
-    _calendar_booked.add(key)
+    state = _session(thread_id)
+    if state["calendars"] >= MAX_CALENDAR_PER_SESSION:
+        return (
+            f"This session already booked {MAX_CALENDAR_PER_SESSION} intro calls. "
+            f"Session action limits reset after {SESSION_IDLE_SECONDS // 60} minutes of inactivity."
+        )
+    state["calendars"] += 1
     return None
 
 
 def release_email(thread_id: str | None = None) -> None:
-    _email_sent.discard(thread_id or thread_key())
+    state = _session(thread_id)
+    if state["emails"] > 0:
+        state["emails"] -= 1
 
 
 def release_calendar(thread_id: str | None = None) -> None:
-    _calendar_booked.discard(thread_id or thread_key())
+    state = _session(thread_id)
+    if state["calendars"] > 0:
+        state["calendars"] -= 1
 
 
 def note_tool_call(name: str, signature: str) -> str | None:
-    key = thread_key()
-    calls = _tool_calls.setdefault(key, [])
-    if signature in calls:
-        return "already_sent"
+    state = _session()
+    calls = state["signatures"]
     if len(calls) >= MAX_TOOL_CALLS:
         return "tool_cap"
-    calls.append(signature)
+    calls.append(f"{name}:{signature}")
     return None
 
 
+def email_count(thread_id: str | None = None) -> int:
+    return int(_session(thread_id)["emails"])
+
+
+def calendar_count(thread_id: str | None = None) -> int:
+    return int(_session(thread_id)["calendars"])
+
+
 def reset_thread_limits() -> None:
-    _email_sent.clear()
-    _calendar_booked.clear()
-    _tool_calls.clear()
+    _sessions.clear()

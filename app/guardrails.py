@@ -39,7 +39,7 @@ _INJECTION_MARKERS = (
     "base64 -d",
     "powershell -enc",
     "drop table",
-    "';(select",
+    "union(select",
     "<script",
     "onerror=",
 )
@@ -47,6 +47,15 @@ _INJECTION_MARKERS = (
 _hits: dict[str, list[float]] = defaultdict(list)
 _lock = Lock()
 _now = time.time
+
+
+def bypass_ips() -> set[str]:
+    raw = os.getenv("BUDGET_BYPASS_IPS", "")
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def is_budget_bypassed(ip: str) -> bool:
+    return bool(ip) and ip in bypass_ips()
 
 
 def _prune(ip: str, now: float) -> list[float]:
@@ -57,11 +66,15 @@ def _prune(ip: str, now: float) -> list[float]:
 
 
 def remaining_questions(ip: str) -> int:
+    if is_budget_bypassed(ip):
+        return MAX_QUESTIONS_PER_IP
     with _lock:
         return max(0, MAX_QUESTIONS_PER_IP - len(_prune(ip, _now())))
 
 
 def consume_question(ip: str) -> str | None:
+    if is_budget_bypassed(ip):
+        return None
     with _lock:
         now = _now()
         stamps = _prune(ip, now)
@@ -73,6 +86,8 @@ def consume_question(ip: str) -> str | None:
 
 
 def release_question(ip: str) -> None:
+    if is_budget_bypassed(ip):
+        return
     with _lock:
         stamps = _prune(ip, _now())
         if stamps:
@@ -82,6 +97,8 @@ def release_question(ip: str) -> None:
 
 def enforce_limit(ip: str) -> None:
     """Immediately exhaust the visitor's remaining window budget."""
+    if is_budget_bypassed(ip):
+        return
     with _lock:
         now = _now()
         stamps = _prune(ip, now)

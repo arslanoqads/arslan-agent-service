@@ -1,4 +1,5 @@
 import base64
+import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -8,6 +9,7 @@ from app.guardrails import (
     INJECTION_REFUSAL,
     assess_message,
     consume_question,
+    enforce_limit,
     remaining_questions,
     reset_question_counts,
 )
@@ -257,6 +259,16 @@ def test_budget_message_on_sixth_question():
     assert consume_question("203.0.113.9") == BUDGET_LIMIT_MESSAGE
 
 
+def test_budget_bypass_ips_unlimited(monkeypatch):
+    monkeypatch.setenv("BUDGET_BYPASS_IPS", "198.51.100.7, 203.0.113.50")
+    for _ in range(20):
+        assert consume_question("198.51.100.7") is None
+    assert remaining_questions("198.51.100.7") == 5
+    enforce_limit("198.51.100.7")
+    assert remaining_questions("198.51.100.7") == 5
+    assert consume_question("203.0.113.9") is None
+
+
 def test_budget_resets_after_thirty_minutes(monkeypatch):
     import app.guardrails as guardrails
 
@@ -388,19 +400,27 @@ def test_choose_route_keeps_followups_on_portfolio():
 
 
 def test_thread_store_roundtrip(tmp_path, monkeypatch):
-    monkeypatch.setenv("THREAD_SQLITE_PATH", str(tmp_path / "threads.sqlite"))
+    db_path = tmp_path / "threads.sqlite"
+    monkeypatch.setenv("THREAD_SQLITE_PATH", str(db_path))
     monkeypatch.delenv("K_SERVICE", raising=False)
     monkeypatch.delenv("TRACE_BACKEND", raising=False)
     import app.runtime.threads as threads
 
     threads._store = None
     threads._memory = threads.MemoryThreadStore()
-    thread_id = f"t-{tmp_path.name}"
+    store = threads.SqliteThreadStore(str(db_path))
+    threads._store = store
+    thread_id = f"t-{tmp_path.name}-{os.getpid()}"
+    store.save(thread_id, [])
     threads.append_turn(thread_id, "book tomorrow 2:30", "I can book a 30-minute call. Proceed?")
     threads.append_turn(thread_id, "yes", "Booking now.")
     loaded = threads.load_turns(thread_id)
-    assert len(loaded) == 4
-    assert loaded[-2]["content"] == "yes"
+    assert [turn["content"] for turn in loaded] == [
+        "book tomorrow 2:30",
+        "I can book a 30-minute call. Proceed?",
+        "yes",
+        "Booking now.",
+    ]
     messages = threads.turns_as_messages(loaded)
     assert messages[-1].content == "Booking now."
 

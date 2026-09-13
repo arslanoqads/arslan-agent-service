@@ -15,59 +15,132 @@
     <header class="top">
       <div class="brand">
         <p class="brand-mark">Observability</p>
-        <p class="brand-sub">Public showcase of agent traces, latency, tokens, and tool usage. No resume text, emails, or phone numbers.</p>
+        <p class="brand-sub">Public traces (including failures), outcomes, and the golden-set classification board.</p>
       </div>
       <nav class="links">
         <a class="link" href="/">Chat</a>
         <a class="link ghost" href="https://github.com/arslanoqads/arslan-agent-service" target="_blank" rel="noopener noreferrer">Repo</a>
       </nav>
     </header>
+
     <section class="gate">
-      <button id="load" type="button">Refresh traces</button>
-      <p id="status" class="hint">Loading public traces…</p>
+      <button id="load" type="button">Refresh</button>
+      <p id="status" class="hint">Loading public traces and golden set…</p>
       <p class="hint">Emails, phones, blocked prompts, resume excerpts, tool arguments, and raw errors are stripped before display.</p>
     </section>
+
     <section class="summary" id="summary"></section>
-    <section class="trace-list" id="list"></section>
-    <pre class="trace-detail" id="detail">Select a trace to inspect the sanitized timeline.</pre>
+
+    <section class="obs-grid">
+      <div>
+        <h2 class="obs-title">Traces</h2>
+        <p class="hint" id="trace-filter-hint">Failed tool turns show as outcome tool_error.</p>
+        <div class="trace-list" id="list"></div>
+      </div>
+      <div>
+        <h2 class="obs-title">Golden set</h2>
+        <p class="hint" id="golden-summary">Classification: family · severity · source</p>
+        <div class="trace-list" id="golden-list"></div>
+      </div>
+    </section>
+
+    <pre class="trace-detail" id="detail">Select a trace or golden case to inspect.</pre>
   </main>
   <script>
     const statusEl = document.getElementById("status");
     const summaryEl = document.getElementById("summary");
     const listEl = document.getElementById("list");
+    const goldenListEl = document.getElementById("golden-list");
+    const goldenSummaryEl = document.getElementById("golden-summary");
     const detailEl = document.getElementById("detail");
+
+    function badge(text, kind) {
+      const span = document.createElement("span");
+      span.className = `badge badge-${kind || "neutral"}`;
+      span.textContent = text;
+      return span;
+    }
+
+    function renderTraceRow(trace) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "trace-row";
+      const tokens = (trace.input_tokens || 0) + (trace.output_tokens || 0);
+      const toolsUsed = (trace.tools || []).join(", ") || "no tools";
+      const outcome = trace.outcome || "success";
+      const head = document.createElement("div");
+      head.className = "row-head";
+      head.append(
+        badge(outcome, outcome.includes("error") ? "fail" : outcome === "success" ? "ok" : "warn"),
+        badge(trace.status || "unknown", "neutral"),
+        badge(trace.route || "unknown", "neutral")
+      );
+      const body = document.createElement("div");
+      body.className = "row-body";
+      const session = trace.thread_id ? `session ${trace.thread_id} · ` : "";
+      body.textContent = `${session}trace ${trace.id || "?"} · ${trace.started_at || ""} · ${trace.duration_ms ?? "—"} ms · ${tokens} tokens · ${toolsUsed} · ${(trace.question || "").slice(0, 100)}`;
+      button.append(head, body);
+      button.addEventListener("click", () => {
+        detailEl.textContent = JSON.stringify(trace, null, 2);
+      });
+      return button;
+    }
+
+    function renderGoldenRow(caseItem) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "trace-row";
+      const head = document.createElement("div");
+      head.className = "row-head";
+      head.append(
+        badge(caseItem.family || "?", caseItem.family === "POS" ? "ok" : caseItem.family === "NEG" ? "fail" : "warn"),
+        badge(caseItem.severity || "?", caseItem.severity === "blocker" ? "fail" : "warn"),
+        badge(caseItem.source || "?", "neutral"),
+        badge(caseItem.expected_tool || "none", "neutral")
+      );
+      const body = document.createElement("div");
+      body.className = "row-body";
+      body.textContent = `${caseItem.id} · ${(caseItem.input || "").slice(0, 120)}`;
+      const notes = document.createElement("div");
+      notes.className = "row-notes";
+      notes.textContent = caseItem.notes || "";
+      button.append(head, body);
+      if (caseItem.notes) button.append(notes);
+      button.addEventListener("click", () => {
+        detailEl.textContent = JSON.stringify(caseItem, null, 2);
+      });
+      return button;
+    }
 
     async function load() {
       statusEl.textContent = "Loading…";
-      const res = await fetch("/observability/traces");
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
+      const [traceRes, goldenRes] = await Promise.all([
+        fetch("/observability/traces"),
+        fetch("/observability/golden-set"),
+      ]);
+      const data = await traceRes.json().catch(() => ({}));
+      const golden = await goldenRes.json().catch(() => ({}));
+      if (!traceRes.ok) {
         statusEl.textContent = data.detail || "Could not load traces";
         return;
       }
-      statusEl.textContent = `${(data.traces || []).length} public traces`;
+
+      const traces = data.traces || [];
+      const failed = traces.filter((t) => (t.outcome || "").includes("error") || t.status === "error");
+      statusEl.textContent = `${traces.length} traces (${failed.length} failed) · backend ${data.backend || "unknown"} · ${(golden.cases || []).length} golden cases`;
+
       const summary = data.summary || {};
       const tools = Object.entries(summary.tools || {}).map(([name, count]) => `${name} ${count}`).join(", ") || "none";
-      summaryEl.textContent = `${summary.requests || 0} requests · avg ${summary.avg_duration_ms || 0} ms · avg ${summary.avg_tokens || 0} tokens · failure ${(summary.failure_rate || 0) * 100}% · cost/request $${summary.cost_per_request || 0} · cost/success $${summary.cost_per_success || 0} · tools ${tools}`;
+      const outcomes = Object.entries(summary.outcomes || {}).map(([name, count]) => `${name} ${count}`).join(", ") || "none";
+      summaryEl.textContent = `${summary.requests || 0} requests · failure ${(summary.failure_rate || 0) * 100}% · outcomes ${outcomes} · avg ${summary.avg_duration_ms || 0} ms · avg ${summary.avg_tokens || 0} tokens · tools ${tools}`;
+
       listEl.replaceChildren();
-      (data.traces || []).forEach((trace) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "trace-row";
-        const tokens = (trace.input_tokens || 0) + (trace.output_tokens || 0);
-        const toolsUsed = (trace.tools || []).join(", ") || "no tools";
-        const cache = trace.cache?.kind
-          ? (trace.cache.kind === "semantic" && trace.cache.similarity != null
-            ? `cache semantic ${trace.cache.similarity}`
-            : `cache ${trace.cache.kind}`)
-          : "no cache";
-        const session = trace.thread_id ? `session ${trace.thread_id} · ` : "";
-        button.textContent = `${session}trace ${trace.id || "?"} · ${trace.started_at || ""} · ${trace.status} · ${trace.route || "unknown"} · ${cache} · ${trace.duration_ms ?? "—"} ms · ${trace.loop_count || 0} loops · ${tokens} tokens · ${toolsUsed} · ${(trace.question || "").slice(0, 80)}`;
-        button.addEventListener("click", () => {
-          detailEl.textContent = JSON.stringify(trace, null, 2);
-        });
-        listEl.appendChild(button);
-      });
+      traces.forEach((trace) => listEl.appendChild(renderTraceRow(trace)));
+
+      const gSummary = golden.summary || {};
+      goldenSummaryEl.textContent = `${gSummary.count || 0} cases · families ${JSON.stringify(gSummary.families || {})} · severities ${JSON.stringify(gSummary.severities || {})} · sources ${JSON.stringify(gSummary.sources || {})}`;
+      goldenListEl.replaceChildren();
+      (golden.cases || []).forEach((caseItem) => goldenListEl.appendChild(renderGoldenRow(caseItem)));
     }
 
     document.getElementById("load").addEventListener("click", load);

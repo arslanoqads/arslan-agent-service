@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from langchain_core.tools import tool
@@ -17,6 +17,7 @@ from app.tools.limits import (
     release_email,
 )
 from app.tools.profile_tools import get_rag_engine
+from app.tools.timeutil import resolve_intro_start
 
 ET = ZoneInfo("America/New_York")
 
@@ -68,14 +69,13 @@ def match_role_from_chunks(job_description: str, chunks: list[str]) -> str:
     )
 
 
-def parse_start(start_time: str) -> datetime:
-    parsed = datetime.fromisoformat(start_time.strip().replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=ET)
-    return parsed.astimezone(ET)
+def parse_start(start_time: str):
+    return resolve_intro_start(start_time)
 
 
-def validate_slot(start: datetime) -> str | None:
+def validate_slot(start) -> str | None:
+    from datetime import datetime
+
     if start <= datetime.now(ET):
         return "That time is in the past. Ask for a future weekday between 9:00 and 17:00 ET."
     if start.weekday() >= 5:
@@ -111,13 +111,25 @@ def send_resume_email(user_email: str, note: str = "") -> str:
         sent = send_gmail(user_email.strip(), note)
     except Exception as exc:
         release_email()
+        detail = str(exc)
+        lowered = detail.lower()
+        if "gmail" in lowered and ("not been used" in lowered or "disabled" in lowered or "accessnotconfigured" in lowered or "has not been used in project" in lowered):
+            return (
+                "Could not send the resume email: Gmail API is not enabled on the GCP project. "
+                "Enable gmail.googleapis.com and retry."
+            )
         return f"Could not send the resume email: {exc}"
     return sent
 
 
 class CalendarInput(BaseModel):
     visitor_email: str = Field(description="Email address that should receive the calendar invite.")
-    start_time: str = Field(description="Start time in ISO 8601, for example 2026-09-15T10:00:00-04:00.")
+    start_time: str = Field(
+        description=(
+            "Start time. Prefer ISO 8601 with offset, or a phrase like "
+            "'tomorrow at 3:00 PM ET'. Always honor tomorrow/today relative to America/New_York."
+        )
+    )
 
 
 @tool("schedule_intro_call", args_schema=CalendarInput)
@@ -134,7 +146,10 @@ def schedule_intro_call(visitor_email: str, start_time: str) -> str:
     try:
         start = parse_start(start_time)
     except ValueError:
-        return "Cannot book a call. Provide a start time in ISO 8601 format."
+        return (
+            "Cannot book a call. Provide a start time like 'tomorrow at 3:00 PM ET' "
+            "or ISO 8601 with offset."
+        )
     slot_error = validate_slot(start)
     if slot_error:
         return slot_error

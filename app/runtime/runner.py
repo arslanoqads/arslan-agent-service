@@ -79,6 +79,21 @@ def finish_trace(trace: dict, *, status: str, started: float, error: str | None 
     trace["cost_usd"] = estimate_usd(MODEL_NAME, trace.get("input_tokens") or 0, trace.get("output_tokens") or 0)
     trace["ended_at"] = datetime.now(timezone.utc).isoformat()
     trace["duration_ms"] = round((time.perf_counter() - started) * 1000)
+    tool_statuses = [item.get("status") for item in trace.get("tool_status") or []]
+    if status == "error":
+        trace["outcome"] = "processing_error"
+    elif trace.get("error_kind") == "guardrail":
+        trace["outcome"] = "guardrail"
+    elif "error" in tool_statuses:
+        trace["outcome"] = "tool_error"
+        # Keep visitor-facing chat ok, but mark the stored trace as failed for observability.
+        trace["status"] = "error"
+        if not trace.get("error_kind"):
+            trace["error_kind"] = "tool_error"
+    elif "refused" in tool_statuses:
+        trace["outcome"] = "tool_refused"
+    else:
+        trace["outcome"] = "success"
 
 
 def _embed(text: str):
@@ -241,7 +256,13 @@ async def stream_turn(message: str, thread_id: str):
     last_ai_text = ""
     try:
         config = {"recursion_limit": RECURSION_LIMIT}
-        graph_input = {"messages": history_messages + [HumanMessage(content=message)]}
+        graph_input = {
+            "messages": history_messages + [HumanMessage(content=message)],
+            "hops": [],
+            "hop_results": [],
+            "active_hop": "",
+            "next_node": "",
+        }
         async for event in _graph.astream_events(
             graph_input,
             config=config,
@@ -305,11 +326,25 @@ async def stream_turn(message: str, thread_id: str):
                 error = output if output.lower().startswith("could not") else None
                 close_span(span, ended_perf=time.perf_counter(), output=output, error=error)
                 status = "error" if error else "ok"
-                if output.startswith("Cannot") or "turned off" in output or "already" in output:
+                if (
+                    output.startswith("Cannot")
+                    or "turned off" in output
+                    or "already" in output
+                    or "in the past" in output.lower()
+                    or "weekdays only" in output.lower()
+                ):
                     status = "refused"
                 trace["tool_status"].append({"name": span["name"], "status": status})
                 _stamp_budget(trace)
-            elif kind == "on_chain_start" and name in {"supervisor", "portfolio_agent", "general_responder"}:
+            elif kind == "on_chain_start" and name in {
+                "supervisor",
+                "hop_entry",
+                "hop_agent",
+                "hop_done",
+                "compose",
+                "general_responder",
+                "portfolio_agent",
+            }:
                 _open_span(
                     trace,
                     open_spans,

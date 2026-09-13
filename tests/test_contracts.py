@@ -425,10 +425,58 @@ def test_thread_store_roundtrip(tmp_path, monkeypatch):
     assert messages[-1].content == "Booking now."
 
 
-def test_golden_set_scaffold_and_routes():
-    from app.evals.runner import run
+def test_composite_store_keeps_failed_traces(tmp_path, monkeypatch):
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    monkeypatch.delenv("TRACE_BACKEND", raising=False)
+    monkeypatch.setenv("TRACE_SQLITE_PATH", str(tmp_path / "traces.sqlite"))
+    import app.observability.store as store_mod
 
-    assert run() == 0
+    store_mod._store = None
+    store_mod._memory = store_mod.MemoryTraceStore()
+    store = store_mod.get_store()
+
+    class Boom:
+        def save(self, trace):
+            raise RuntimeError("firestore down")
+
+        def get(self, trace_id):
+            return None
+
+        def list_traces(self, limit=50):
+            raise RuntimeError("firestore down")
+
+    store.durable = Boom()
+    failed = {
+        "id": "fail-1",
+        "started_at": "2026-09-13T20:00:00+00:00",
+        "status": "error",
+        "outcome": "tool_error",
+        "tools": ["send_resume_email"],
+        "tool_status": [{"name": "send_resume_email", "status": "error"}],
+        "spans": [],
+    }
+    store.save(failed)
+    listed = store.list_traces()
+    assert listed[0]["id"] == "fail-1"
+    assert listed[0]["outcome"] == "tool_error"
+
+
+def test_public_golden_set_endpoint(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-used")
+    monkeypatch.setenv("TRACE_SQLITE_PATH", str(tmp_path / "traces.sqlite"))
+    monkeypatch.setenv("TRACE_BACKEND", "sqlite")
+    monkeypatch.setenv("GUARD_MODEL_ENABLED", "0")
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    client = TestClient(app)
+    res = client.get("/observability/golden-set")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["summary"]["count"] >= 1
+    first = data["cases"][0]
+    assert {"id", "family", "severity", "source", "expected_tool"} <= set(first.keys())
 
 
 def test_public_error_message_hides_openai_dump():
@@ -441,6 +489,37 @@ def test_public_error_message_hides_openai_dump():
     assert public_error_message(raw) == MESSAGE_SHAPE_MESSAGE
     assert "Error code" not in public_error_message(raw)
     assert "{" not in public_error_message("Traceback (most recent call last)")
+
+
+def test_resolve_intro_start_honors_tomorrow(monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.tools.timeutil import resolve_intro_start
+
+    et = ZoneInfo("America/New_York")
+    now = datetime(2026, 9, 13, 15, 31, tzinfo=et)  # Sunday 3:31pm ET
+    resolved = resolve_intro_start("tomorrow at 3:00 PM ET", now=now)
+    assert resolved.date().isoformat() == "2026-09-14"
+    assert resolved.hour == 15
+    # Model mistakenly emits today's ISO while text says tomorrow.
+    wrong = resolve_intro_start("2026-09-13T15:00:00-04:00 tomorrow", now=now)
+    assert wrong.date().isoformat() == "2026-09-14"
+
+
+def test_plan_hops_splits_email_and_calendar():
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from app.runtime.hops import plan_hops
+
+    hops = plan_hops(
+        [
+            HumanMessage(content="send me your resume at a@example.com and book a call tomorrow at 3"),
+            AIMessage(content="What timezone?"),
+            HumanMessage(content="3pm ET tomorrow"),
+        ]
+    )
+    assert hops == ["email", "calendar"]
 
 
 def test_prepare_model_messages_keeps_tool_pairs():

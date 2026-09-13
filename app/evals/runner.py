@@ -3,20 +3,61 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PUBLIC_SET = ROOT / "tests" / "evals" / "golden_set.public.json"
+APP_ROOT = Path(__file__).resolve().parent
+PUBLIC_SET_CANDIDATES = (
+    ROOT / "tests" / "evals" / "golden_set.public.json",
+    APP_ROOT / "golden_set.public.json",
+)
 PRIVATE_SET = ROOT / "tests" / "evals" / "golden_set.private.json"
-SCHEMA = ROOT / "tests" / "evals" / "schema.json"
+SCHEMA_CANDIDATES = (
+    ROOT / "tests" / "evals" / "schema.json",
+    APP_ROOT / "schema.json",
+)
+
+
+def _first_existing(paths) -> Path | None:
+    for path in paths:
+        if path.exists():
+            return path
+    return None
 
 
 def load_cases() -> list[dict]:
     cases = []
-    for path in (PUBLIC_SET, PRIVATE_SET):
-        if not path.exists():
+    public = _first_existing(PUBLIC_SET_CANDIDATES)
+    for path in (public, PRIVATE_SET if PRIVATE_SET.exists() else None):
+        if path is None or not path.exists():
             continue
         data = json.loads(path.read_text())
         if isinstance(data, list):
             cases.extend(data)
     return cases
+
+
+def load_public_cases() -> list[dict]:
+    path = _first_existing(PUBLIC_SET_CANDIDATES)
+    if path is None:
+        return []
+    data = json.loads(path.read_text())
+    return data if isinstance(data, list) else []
+
+
+def public_case(case: dict) -> dict:
+    """Fields safe to show on the public observability page."""
+    return {
+        "id": case.get("id"),
+        "family": case.get("family"),
+        "severity": case.get("severity"),
+        "source": case.get("source"),
+        "oracle": case.get("oracle"),
+        "expected_tool": case.get("expected_tool"),
+        "expected_route": case.get("expected_route"),
+        "input": case.get("input"),
+        "prior_turns": case.get("prior_turns") or [],
+        "must_include": case.get("must_include") or [],
+        "must_not_include": case.get("must_not_include") or [],
+        "notes": case.get("notes") or "",
+    }
 
 
 def score_case(case: dict, actual: dict) -> list[str]:
@@ -78,7 +119,11 @@ def run() -> int:
     if not cases:
         print("Golden set is empty. No cases to score.")
         return 0
-    schema = json.loads(SCHEMA.read_text())
+    schema_path = _first_existing(SCHEMA_CANDIDATES)
+    if schema_path is None:
+        print("Golden schema missing.")
+        return 1
+    schema = json.loads(schema_path.read_text())
     required = schema["required"]
     missing = []
     route_failures = []

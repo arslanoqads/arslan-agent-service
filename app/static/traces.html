@@ -391,6 +391,12 @@
       const conv = (data.summary || {}).conversation || {};
       const failed = traces.filter((t) => (t.outcome || "").includes("error") || t.status === "error");
       statusEl.textContent = `${traces.length} traces · ${(conv.totals || {}).sessions || 0} sessions · ${failed.length} failed · ${(golden.cases || []).length} golden cases`;
+      const persistence = data.persistence || {};
+      if (persistence.last_errors && Object.keys(persistence.last_errors).length) {
+        statusEl.textContent += ` · persistence warnings: ${Object.keys(persistence.last_errors).join(", ")}`;
+      } else if (persistence.backend || data.backend) {
+        statusEl.textContent += ` · backend ${persistence.backend || data.backend}`;
+      }
 
       renderKpis(conv);
       renderCharts(conv);

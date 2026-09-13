@@ -458,6 +458,32 @@ def test_prepare_model_messages_keeps_tool_pairs():
     assert prepared[2].content.startswith("Built agent")
 
 
+def test_prepare_model_messages_keeps_parallel_tool_results():
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from app.agent.graph import prepare_model_messages
+
+    human = HumanMessage(content="Email the resume and book tomorrow 3pm ET")
+    ai = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "send_resume_email", "args": {"user_email": "a@example.com"}, "id": "email-1"},
+            {"name": "schedule_intro_call", "args": {"visitor_email": "a@example.com", "start_time": "2026-09-14T15:00:00-04:00"}, "id": "cal-1"},
+        ],
+    )
+    email_tool = ToolMessage(content="Resume emailed.", tool_call_id="email-1")
+    cal_tool = ToolMessage(content="Booked intro call.", tool_call_id="cal-1")
+    prepared = prepare_model_messages([human, ai, email_tool, cal_tool])
+    assert [type(message).__name__ for message in prepared] == [
+        "HumanMessage",
+        "AIMessage",
+        "ToolMessage",
+        "ToolMessage",
+    ]
+    assert prepared[2].tool_call_id == "email-1"
+    assert prepared[3].tool_call_id == "cal-1"
+
+
 def test_links_question_is_not_an_action():
     from app.runtime.route import is_links_request
 

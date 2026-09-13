@@ -61,7 +61,8 @@
             ? `cache semantic ${trace.cache.similarity}`
             : `cache ${trace.cache.kind}`)
           : "no cache";
-        button.textContent = `${trace.started_at || ""} · ${trace.status} · ${trace.route || "unknown"} · ${cache} · ${trace.duration_ms ?? "—"} ms · ${trace.loop_count || 0} loops · ${tokens} tokens · ${toolsUsed} · ${(trace.question || "").slice(0, 80)}`;
+        const session = trace.thread_id ? `session ${trace.thread_id} · ` : "";
+        button.textContent = `${session}trace ${trace.id || "?"} · ${trace.started_at || ""} · ${trace.status} · ${trace.route || "unknown"} · ${cache} · ${trace.duration_ms ?? "—"} ms · ${trace.loop_count || 0} loops · ${tokens} tokens · ${toolsUsed} · ${(trace.question || "").slice(0, 80)}`;
         button.addEventListener("click", () => {
           detailEl.textContent = JSON.stringify(trace, null, 2);
         });

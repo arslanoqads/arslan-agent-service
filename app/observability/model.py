@@ -159,6 +159,7 @@ def public_trace(trace: dict) -> dict:
     """Sanitized trace for public chat and the public observability dashboard."""
     return {
         "id": trace.get("id") or str(uuid.uuid4()),
+        "thread_id": trace.get("thread_id") or "",
         "started_at": _as_text(trace.get("started_at")),
         "ended_at": _as_text(trace.get("ended_at")),
         "status": trace.get("status") or "unknown",

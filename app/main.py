@@ -8,7 +8,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import app.config.settings  # Load .env and validate OPENAI_API_KEY before graph init
-from app.guardrails import BUDGET_LIMIT_MESSAGE, consume_question, release_question
+from app.guardrails import (
+    BUDGET_LIMIT_MESSAGE,
+    INJECTION_REFUSAL,
+    assess_message,
+    consume_question,
+    enforce_limit,
+    release_question,
+)
 from app.observability.model import public_trace
 from app.observability.store import get_store, summary
 from app.runtime.errors import public_error_message
@@ -77,6 +84,20 @@ async def run_chat(query: ChatQuery, request: Request):
             "trace_id": trace["id"],
         }
         return
+
+    unsafe, category = assess_message(query.message)
+    if unsafe:
+        enforce_limit(ip)
+        refusal = INJECTION_REFUSAL
+        trace = record_guardrail(query.thread_id, query.message, f"injection:{category}", refusal)
+        yield {
+            "type": "done",
+            "response": refusal,
+            "trace": public_trace(trace),
+            "trace_id": trace["id"],
+        }
+        return
+
     try:
         async for event in stream_turn(query.message, query.thread_id):
             if event.get("type") == "error":

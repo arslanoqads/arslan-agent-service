@@ -69,7 +69,7 @@
 
   addMessage(
     "system",
-    "Try a suggestion below. Demo limit: 2 questions per visitor to control budget."
+    "Try a suggestion below. Demo limit: 5 questions per visitor every 30 minutes."
   );
 
   suggestions?.addEventListener("click", (event) => {

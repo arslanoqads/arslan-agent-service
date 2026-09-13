@@ -58,6 +58,19 @@
       </div>
     </section>
 
+    <section class="rag-triage" id="golden-metrics">
+      <h2 class="obs-title">Golden set · category scores</h2>
+      <p class="hint" id="golden-metrics-note">Average contract scores by family, severity, source, and tool — plus daily average over time.</p>
+      <div class="triad-grid" id="golden-kpis"></div>
+      <div class="chart-grid golden-charts">
+        <div class="chart-card"><h3>By family</h3><canvas id="chart-golden-family"></canvas></div>
+        <div class="chart-card"><h3>By severity</h3><canvas id="chart-golden-severity"></canvas></div>
+        <div class="chart-card"><h3>By source</h3><canvas id="chart-golden-source"></canvas></div>
+        <div class="chart-card"><h3>By expected tool</h3><canvas id="chart-golden-tool"></canvas></div>
+        <div class="chart-card chart-wide"><h3>Average score over time</h3><canvas id="chart-golden-time"></canvas></div>
+      </div>
+    </section>
+
     <section class="summary" id="summary"></section>
 
     <section class="obs-grid">
@@ -87,6 +100,8 @@
     const ragDiagnosisEl = document.getElementById("rag-diagnosis");
     const ragPatternsEl = document.getElementById("rag-patterns");
     const ragPlaybookEl = document.getElementById("rag-playbook");
+    const goldenKpisEl = document.getElementById("golden-kpis");
+    const goldenMetricsNoteEl = document.getElementById("golden-metrics-note");
     const charts = {};
 
     const palette = ["#0f6e56", "#243447", "#8a6414", "#8c2828", "#4d6b5c", "#6b5a4d", "#2f5d8a"];
@@ -152,6 +167,51 @@
           plugins: { legend: { position: "bottom", labels: { color: "#5c534a", boxWidth: 12 } } },
         },
       });
+    }
+
+    function lineChart(id, labels, values, label) {
+      destroyChart(id);
+      const ctx = document.getElementById(id);
+      if (!ctx) return;
+      charts[id] = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [{
+            label,
+            data: values,
+            borderColor: "#0f6e56",
+            backgroundColor: "rgba(15, 110, 86, 0.12)",
+            fill: true,
+            tension: 0.25,
+            pointRadius: 3,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: "#5c534a", maxRotation: 0 }, grid: { display: false } },
+            y: {
+              beginAtZero: true,
+              max: 100,
+              ticks: { color: "#5c534a", callback: (v) => `${v}%` },
+              grid: { color: "rgba(26,23,20,0.08)" },
+            },
+          },
+        },
+      });
+    }
+
+    function categoryAvgChart(id, bucket) {
+      const entries = Object.entries(bucket || {});
+      barChart(
+        id,
+        entries.length ? entries.map(([key]) => key) : ["none"],
+        entries.length ? entries.map(([, row]) => Math.round(((row && row.avg) || 0) * 100)) : [0],
+        "avg %"
+      );
     }
 
     function renderKpis(conv) {
@@ -348,18 +408,53 @@
       return button;
     }
 
+    function renderGoldenMetrics(golden) {
+      const metrics = golden.metrics || {};
+      goldenMetricsNoteEl.textContent = metrics.note
+        || "Average contract scores by family, severity, source, and tool — plus daily average over time.";
+      goldenKpisEl.replaceChildren();
+      [
+        ["Overall avg", `${Math.round((metrics.overall_avg || 0) * 100)}%`],
+        ["Pass rate", `${Math.round((metrics.pass_rate || 0) * 100)}%`],
+        ["Samples", metrics.samples || 0],
+        ["Cases covered", `${metrics.cases_covered || 0}/${metrics.cases_total || 0}`],
+      ].forEach(([label, value]) => {
+        const card = document.createElement("div");
+        card.className = "triad-card";
+        card.innerHTML = `<p class="kpi-label">${label}</p><p class="kpi-value">${value}</p>`;
+        goldenKpisEl.appendChild(card);
+      });
+
+      categoryAvgChart("chart-golden-family", metrics.by_family);
+      categoryAvgChart("chart-golden-severity", metrics.by_severity);
+      categoryAvgChart("chart-golden-source", metrics.by_source);
+      categoryAvgChart("chart-golden-tool", metrics.by_expected_tool);
+
+      const series = metrics.over_time || [];
+      lineChart(
+        "chart-golden-time",
+        series.length ? series.map((row) => row.date) : ["—"],
+        series.length ? series.map((row) => Math.round((row.avg || 0) * 100)) : [0],
+        "avg %"
+      );
+    }
+
     function renderGoldenRow(caseItem) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "trace-row";
       const head = document.createElement("div");
       head.className = "row-head";
+      const score = caseItem.avg_score;
       head.append(
         badge(caseItem.family || "?", caseItem.family === "POS" ? "ok" : caseItem.family === "NEG" ? "fail" : "warn"),
         badge(caseItem.severity || "?", caseItem.severity === "blocker" ? "fail" : "warn"),
         badge(caseItem.source || "?", "neutral"),
         badge(caseItem.expected_tool || "none", "neutral")
       );
+      if (score != null) {
+        head.append(badge(`${Math.round(score * 100)}% avg`, score >= 0.7 ? "ok" : score >= 0.45 ? "warn" : "fail"));
+      }
       const body = document.createElement("div");
       body.className = "row-body";
       body.textContent = `${caseItem.id} · ${(caseItem.input || "").slice(0, 120)}`;
@@ -401,6 +496,7 @@
       renderKpis(conv);
       renderCharts(conv);
       renderRagTriage(conv);
+      renderGoldenMetrics(golden);
 
       const summary = data.summary || {};
       summaryEl.textContent = `Failure rate ${Math.round((summary.failure_rate || 0) * 100)}% · avg turn ${summary.avg_duration_ms || 0} ms · avg tokens ${summary.avg_tokens || 0} · cost/request $${summary.cost_per_request || 0} · cost/success $${summary.cost_per_success || 0}`;
@@ -409,7 +505,8 @@
       traces.forEach((trace) => listEl.appendChild(renderTraceRow(trace)));
 
       const gSummary = golden.summary || {};
-      goldenSummaryEl.textContent = `${gSummary.count || 0} cases · families ${JSON.stringify(gSummary.families || {})} · severities ${JSON.stringify(gSummary.severities || {})} · sources ${JSON.stringify(gSummary.sources || {})}`;
+      const gMetrics = golden.metrics || {};
+      goldenSummaryEl.textContent = `${gSummary.count || 0} cases · avg ${Math.round((gMetrics.overall_avg || 0) * 100)}% · pass ${Math.round((gMetrics.pass_rate || 0) * 100)}% · families ${JSON.stringify(gSummary.families || {})} · severities ${JSON.stringify(gSummary.severities || {})} · sources ${JSON.stringify(gSummary.sources || {})}`;
       goldenListEl.replaceChildren();
       (golden.cases || []).forEach((caseItem) => goldenListEl.appendChild(renderGoldenRow(caseItem)));
     }

@@ -540,6 +540,14 @@ textarea:focus {
   background: rgba(15, 110, 86, 0.08);
 }
 
+.chart-wide {
+  grid-column: 1 / -1;
+}
+
+.golden-charts {
+  margin-top: 0.35rem;
+}
+
 .row-head {
   display: flex;
   flex-wrap: wrap;

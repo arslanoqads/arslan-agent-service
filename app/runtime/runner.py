@@ -6,6 +6,9 @@ from langchain_core.messages import HumanMessage
 from app.agent.graph import MODEL_NAME, PIPELINE_VERSION, PROMPT_VERSION, RECURSION_LIMIT, SYSTEM_PROMPT, TOOLS_BRIEF, TOKEN_CEILING, builder
 from app.cache.answers import cacheable, lookup, store as store_answer
 from app.context.budget import assemble, current_context_budget
+from app.evals.durable import get_golden_store
+from app.evals.metrics import match_scores
+from app.evals.runner import load_public_cases
 from app.guardrails import INJECTION_REFUSAL, looks_like_injection
 from app.observability.cost import classify_error, estimate_usd
 from app.observability.model import close_span, new_span, new_trace, persisted_trace, public_trace, span_kind
@@ -36,6 +39,18 @@ def save_trace(trace: dict) -> None:
         store().save(persisted_trace(trace))
     except Exception:
         return
+    try:
+        _record_golden_scores(trace)
+    except Exception:
+        return
+
+
+def _record_golden_scores(trace: dict) -> None:
+    if not trace.get("question") or not trace.get("id"):
+        return
+    cases = load_public_cases()
+    for point in match_scores(cases, [trace]):
+        get_golden_store().save_score(point)
 
 
 def _usage(output) -> tuple[int, int]:

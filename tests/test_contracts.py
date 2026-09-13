@@ -551,6 +551,69 @@ def test_golden_store_merges_durable_cases(tmp_path, monkeypatch):
     assert len(cases) >= 2
 
 
+def test_golden_metrics_by_category_and_over_time():
+    from app.evals.metrics import aggregate_golden_metrics
+
+    cases = [
+        {
+            "id": "email-case",
+            "family": "POS",
+            "severity": "blocker",
+            "source": "production",
+            "input": "send me your resume at [redacted-email]",
+            "expected_tool": "send_resume_email",
+            "oracle": "code",
+        },
+        {
+            "id": "near-yes",
+            "family": "NEAR",
+            "severity": "major",
+            "source": "synthetic",
+            "input": "yes",
+            "expected_tool": "schedule_intro_call",
+            "expected_route": "portfolio_agent",
+            "oracle": "code",
+        },
+    ]
+    traces = [
+        {
+            "id": "t1",
+            "question": "send me your resume at [redacted-email]",
+            "tools": ["send_resume_email"],
+            "route": "portfolio",
+            "outcome": "success",
+            "started_at": "2026-09-10T12:00:00+00:00",
+        },
+        {
+            "id": "t2",
+            "question": "send me your resume at [redacted-email]",
+            "tools": [],
+            "route": "portfolio",
+            "outcome": "processing_error",
+            "started_at": "2026-09-11T12:00:00+00:00",
+        },
+        {
+            "id": "t3",
+            "question": "yes",
+            "tools": ["schedule_intro_call"],
+            "route": "portfolio",
+            "outcome": "success",
+            "started_at": "2026-09-11T15:00:00+00:00",
+        },
+    ]
+    metrics = aggregate_golden_metrics(cases, traces)
+    assert metrics["samples"] == 3
+    assert "POS" in metrics["by_family"]
+    assert "NEAR" in metrics["by_family"]
+    assert "blocker" in metrics["by_severity"]
+    assert "production" in metrics["by_source"]
+    assert "send_resume_email" in metrics["by_expected_tool"]
+    assert len(metrics["over_time"]) == 2
+    assert metrics["over_time"][0]["date"] == "2026-09-10"
+    assert metrics["by_family"]["POS"]["n"] == 2
+    assert metrics["overall_avg"] > 0
+
+
 def test_public_golden_set_endpoint(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "test-not-used")
     monkeypatch.setenv("TRACE_SQLITE_PATH", str(tmp_path / "traces.sqlite"))
@@ -567,6 +630,9 @@ def test_public_golden_set_endpoint(monkeypatch, tmp_path):
     assert data["summary"]["count"] >= 1
     first = data["cases"][0]
     assert {"id", "family", "severity", "source", "expected_tool"} <= set(first.keys())
+    assert "metrics" in data
+    assert "by_family" in data["metrics"]
+    assert "over_time" in data["metrics"]
     dumped = str(data)
     assert "@gmail.com" not in dumped
     assert "arslanoqads@" not in dumped

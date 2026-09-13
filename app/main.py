@@ -17,6 +17,7 @@ from app.guardrails import (
     release_question,
 )
 from app.evals.durable import get_golden_store
+from app.evals.metrics import aggregate_golden_metrics, match_scores
 from app.evals.runner import load_public_cases, public_case
 from app.observability.model import public_question, public_trace
 from app.observability.store import DEFAULT_LIST_LIMIT, classify_outcome, get_store, summary
@@ -186,7 +187,8 @@ def list_traces():
 
 @app.get("/observability/golden-set")
 def list_golden_set():
-    cases = [public_case(case) for case in load_public_cases()]
+    raw_cases = load_public_cases()
+    cases = [public_case(case) for case in raw_cases]
     families = {}
     severities = {}
     sources = {}
@@ -195,10 +197,26 @@ def list_golden_set():
         severities[case["severity"]] = severities.get(case["severity"], 0) + 1
         sources[case["source"]] = sources.get(case["source"], 0) + 1
     persistence = {}
+    durable_scores = []
     try:
-        persistence = get_golden_store().persistence_status()
+        store = get_golden_store()
+        persistence = store.persistence_status()
+        durable_scores = store.list_scores()
     except Exception:
         persistence = {}
+    try:
+        traces = _store.list_traces(DEFAULT_LIST_LIMIT) or []
+    except Exception:
+        traces = []
+    metrics = aggregate_golden_metrics(raw_cases, traces, durable_scores)
+    # Attach per-case avg onto the public list for the UI badges.
+    score_by_id = {row["id"]: row for row in metrics.get("case_scores") or []}
+    for case in cases:
+        row = score_by_id.get(case.get("id") or "")
+        if row:
+            case["avg_score"] = row.get("avg_score")
+            case["score_n"] = row.get("n")
+            case["pass_rate"] = row.get("pass_rate")
     return {
         "cases": cases,
         "summary": {
@@ -207,6 +225,7 @@ def list_golden_set():
             "severities": severities,
             "sources": sources,
         },
+        "metrics": metrics,
         "persistence": persistence,
     }
 

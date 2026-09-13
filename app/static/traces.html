@@ -16,7 +16,7 @@
     <header class="top">
       <div class="brand">
         <p class="brand-mark">Observability</p>
-        <p class="brand-sub">Session health, tool mix, latency, RAG triad triage, costs, and golden-set classifications. PII redacted.</p>
+        <p class="brand-sub">Business conversion first (resume or appointment), then diagnostics for why sessions did not convert. PII redacted.</p>
       </div>
       <nav class="links">
         <a class="link" href="/">Chat</a>
@@ -29,37 +29,69 @@
       <p id="status" class="hint">Loading public traces and golden set…</p>
     </section>
 
-    <section class="kpi-grid" id="kpi"></section>
+    <section class="rag-triage" id="business-success">
+      <h2 class="obs-title">Business success <span class="info-tip" tabindex="0" data-tip="Primary KPI: a session converts when resume email or intro appointment completes successfully." aria-label="Why track this">i</span></h2>
+      <p class="hint">Primary metric = visitor requested a resume or booked an appointment. Everything below explains misses.</p>
+      <div class="kpi-grid" id="kpi-primary"></div>
+      <div class="chart-grid">
+        <div class="chart-card" data-tip="Share of sessions that converted (resume and/or appointment) vs did not.">
+          <h3>Conversion mix <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+          <canvas id="chart-conversion"></canvas>
+        </div>
+        <div class="chart-card" data-tip="Share of sessions where each tool completed successfully — email, appointment, JD match, profile, links.">
+          <h3>Successful tool mix <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+          <canvas id="chart-tool-mix"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section class="rag-triage" id="why-not">
+      <h2 class="obs-title">Why sessions did not convert <span class="info-tip" tabindex="0" data-tip="Secondary diagnostics among non-converted sessions: budget, failures, latency, weak RAG, guardrails, or browse-only." aria-label="Why track this">i</span></h2>
+      <p class="hint">Among sessions with no successful resume/appointment — what went wrong?</p>
+      <div class="kpi-grid" id="kpi-secondary"></div>
+      <div class="chart-grid">
+        <div class="chart-card" data-tip="Counts of non-converted sessions touching each failure mode (a session can count in more than one).">
+          <h3>Non-conversion reasons <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+          <canvas id="chart-why-not"></canvas>
+        </div>
+        <div class="chart-card" data-tip="Latency and TTFT — slow answers can kill conversion before someone asks for resume/appointment.">
+          <h3>Latency & TTFT (ms) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+          <canvas id="chart-latency"></canvas>
+        </div>
+        <div class="chart-card" data-tip="Which tools fail most often among all traffic.">
+          <h3>Tool failures <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+          <canvas id="chart-tool-failures"></canvas>
+        </div>
+        <div class="chart-card" data-tip="RAG triad from golden set — weak retrieval/grounding can explain browse-only non-converters.">
+          <h3>RAG triad (golden set) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+          <canvas id="chart-rag"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section class="rag-triage" id="ops-health">
+      <h2 class="obs-title">Operational health <span class="info-tip" tabindex="0" data-tip="Supporting volume, cost, latency, and RAG health — context for conversion, not the primary success metric." aria-label="Why track this">i</span></h2>
+      <p class="hint">Volume, cost, and RAG health underneath the conversion story.</p>
+      <div class="kpi-grid" id="kpi"></div>
+    </section>
     <section class="chart-grid">
-      <div class="chart-card" data-tip="Distribution of how many distinct tools a session used (0/1/2/3+). Shows whether visitors exercise single-tool or multi-hop flows.">
+      <div class="chart-card" data-tip="Distribution of how many distinct tools a session used (0/1/2/3+).">
         <h3>Tools per session <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
         <canvas id="chart-tools-session"></canvas>
       </div>
-      <div class="chart-card" data-tip="Turn outcomes (success, tool_error, guardrail, refused). The mix tells you whether failures are model, tool, or policy issues.">
+      <div class="chart-card" data-tip="Turn outcomes (success, tool_error, guardrail, refused).">
         <h3>Outcomes <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
         <canvas id="chart-outcomes"></canvas>
       </div>
-      <div class="chart-card" data-tip="Which tools fail most often. Use this to prioritize API enablement, auth, and validation fixes.">
-        <h3>Tool failures <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
-        <canvas id="chart-tool-failures"></canvas>
-      </div>
-      <div class="chart-card" data-tip="End-to-end latency and time-to-first-token. TTFT tracks perceived snappiness; p95 catches tail pain users feel.">
-        <h3>Latency & TTFT (ms) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
-        <canvas id="chart-latency"></canvas>
-      </div>
-      <div class="chart-card" data-tip="Agent loops and retries. Rising loops/retries usually mean brittle tool schemas, message-shape bugs, or provider flakiness.">
+      <div class="chart-card" data-tip="Agent loops and retries.">
         <h3>Loops & retries <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
         <canvas id="chart-loops"></canvas>
       </div>
-      <div class="chart-card" data-tip="Average input/output tokens per turn. Tracks cost drivers and context bloat before you hit ceilings.">
+      <div class="chart-card" data-tip="Average input/output tokens per turn.">
         <h3>Tokens (avg) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
         <canvas id="chart-tokens"></canvas>
       </div>
-      <div class="chart-card" data-tip="RAG triad scores from the RAG golden set: average of labeled cases for context relevance, faithfulness, and answer relevance.">
-        <h3>RAG triad (golden set) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
-        <canvas id="chart-rag"></canvas>
-      </div>
-      <div class="chart-card" data-tip="Highest-cost sessions. Spots expensive multi-tool or retrieval-heavy conversations worth optimizing.">
+      <div class="chart-card" data-tip="Highest-cost sessions.">
         <h3>Cost per session (top) <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
         <canvas id="chart-cost-session"></canvas>
       </div>
@@ -139,6 +171,8 @@
     const goldenSummaryEl = document.getElementById("golden-summary");
     const detailEl = document.getElementById("detail");
     const kpiEl = document.getElementById("kpi");
+    const kpiPrimaryEl = document.getElementById("kpi-primary");
+    const kpiSecondaryEl = document.getElementById("kpi-secondary");
     const triadScoresEl = document.getElementById("triad-scores");
     const ragNoteEl = document.getElementById("rag-triage-note");
     const ragDiagnosisEl = document.getElementById("rag-diagnosis");
@@ -159,24 +193,6 @@
     let goldenVisible = PAGE_SIZE;
     let ragVisible = PAGE_SIZE;
     const charts = {};
-    const kpiTips = {
-      "Sessions": "Unique conversation threads. The denominator for per-session cost, tools, and health.",
-      "Turns": "Individual user asks. Volume and load signal for the agent.",
-      "Tool failures": "Failed tool invocations. Early warning for Gmail/Calendar/RAG outages.",
-      "Avg latency": "Mean end-to-end response time. Baseline for user wait.",
-      "Avg TTFT": "Time to first token. Tracks how fast the answer starts streaming.",
-      "P95 latency": "Tail latency. Catches the slow sessions averages hide.",
-      "Retries": "Provider/tool retries. Spikes mean instability or message-shape errors.",
-      "Avg loops": "Graph/tool loops per turn. High loops often mean the agent is thrashing.",
-      "Session tokens": "Total tokens across listed sessions. Primary cost envelope.",
-      "In / out tokens": "Prompt vs completion tokens. Shows whether cost is context or generation heavy.",
-      "Cost total": "Estimated USD for listed turns. Keeps demo spend visible.",
-      "Cost / session": "Average USD per session. Useful for unit-economics storytelling.",
-      "Context relevance": "Did retrieval fetch useful docs for the query? Low ⇒ fix search/rewrite.",
-      "Faithfulness": "Did the answer stick to retrieved facts (or abstain)? Low ⇒ hallucination risk.",
-      "Answer relevance": "Did the final answer address the user ask? Low ⇒ off-topic grounded answers.",
-      "RAG turn rate": "Share of turns that called retrieval tools. Context for triad sample size.",
-    };
 
     function tipButton(text) {
       const tip = document.createElement("span");
@@ -190,9 +206,218 @@
 
     function bindTips(root) {
       (root || document).querySelectorAll("[data-tip]").forEach((el) => {
-        const tipEl = el.classList.contains("info-tip") ? el : el.querySelector(":scope > h2 .info-tip, :scope > h3 .info-tip, .info-tip");
+        const tipEl = el.classList.contains("info-tip")
+          ? el
+          : el.querySelector(":scope > h2 .info-tip, :scope > h3 .info-tip, .info-tip");
         if (tipEl && el.dataset.tip) tipEl.dataset.tip = el.dataset.tip;
       });
+    }
+
+    const kpiTips = {
+      "Conversion rate": "Share of sessions where resume email or intro appointment completed successfully — the primary business KPI.",
+      "Converted sessions": "Sessions with at least one successful resume send or appointment booking.",
+      "Resume sends": "Sessions with a successful send_resume_email tool call.",
+      "Appointments": "Sessions with a successful schedule_intro_call tool call.",
+      "Both": "Sessions that successfully did resume email and appointment.",
+      "Hit 5-msg budget": "Sessions that hit the 5-questions-per-30-minutes demo limit — visitor could not continue to convert.",
+      "Non-converted": "Sessions with neither successful resume nor appointment.",
+      "Tool failures (non-conv)": "Non-converted sessions that had at least one tool error.",
+      "Slow latency (non-conv)": "Non-converted sessions with a slow turn (hurts conversion).",
+      "Weak RAG (non-conv)": "Non-converted sessions where retrieval/grounding looked weak.",
+      "Budget (non-conv)": "Non-converted sessions that ran out of the 5-message budget.",
+      "Browse-only": "Non-converted sessions with no budget, tool failure, injection, slow latency, or weak RAG — visitor never asked for resume/appointment.",
+      "Avg successful tools": "Average number of distinct successful tools per session (email, calendar, JD, profile, links).",
+      "Sessions": "Unique conversation threads.",
+      "Turns": "Individual user asks.",
+      "Tool failures": "Failed tool invocations overall.",
+      "Avg latency": "Mean end-to-end response time.",
+      "Avg TTFT": "Time to first token.",
+      "P95 latency": "Tail latency.",
+      "Retries": "Provider/tool retries.",
+      "Avg loops": "Graph/tool loops per turn.",
+      "Session tokens": "Total tokens across listed sessions.",
+      "In / out tokens": "Prompt vs completion tokens.",
+      "Cost total": "Estimated USD for listed turns.",
+      "Cost / session": "Average USD per session.",
+      "Context relevance": "RAG golden-set average: right docs fetched?",
+      "Faithfulness": "RAG golden-set average: grounded or abstained?",
+      "Answer relevance": "RAG golden-set average: addressed the ask?",
+      "RAG turn rate": "Share of turns that called retrieval tools.",
+    };
+
+    function fillKpiGrid(el, items) {
+      if (!el) return;
+      el.replaceChildren();
+      items.forEach(([label, value]) => {
+        const card = document.createElement("div");
+        card.className = "kpi-card";
+        const labelEl = document.createElement("p");
+        labelEl.className = "kpi-label";
+        labelEl.append(label + " ", tipButton(kpiTips[label] || "Operational health metric for this agent."));
+        const valueEl = document.createElement("p");
+        valueEl.className = "kpi-value";
+        valueEl.textContent = value;
+        card.append(labelEl, valueEl);
+        el.appendChild(card);
+      });
+    }
+
+    function renderKpis(conv) {
+      const totals = conv.totals || {};
+      const latency = conv.latency || {};
+      const ttft = conv.ttft || {};
+      const cost = conv.cost || {};
+      const rag = conv.rag || {};
+      const triad = (rag.triad || {}).scores || {};
+      const biz = conv.business || {};
+      const why = biz.why_not_converted || {};
+
+      fillKpiGrid(kpiPrimaryEl, [
+        ["Conversion rate", `${Math.round((biz.conversion_rate || 0) * 100)}%`],
+        ["Converted sessions", `${biz.converted_sessions || 0} / ${biz.sessions || 0}`],
+        ["Resume sends", `${biz.resume_sessions || 0} (${Math.round((biz.resume_rate || 0) * 100)}%)`],
+        ["Appointments", `${biz.appointment_sessions || 0} (${Math.round((biz.appointment_rate || 0) * 100)}%)`],
+        ["Both", `${biz.both_sessions || 0} (${Math.round((biz.both_rate || 0) * 100)}%)`],
+        ["Avg successful tools", biz.avg_successful_tools_per_session || 0],
+      ]);
+
+      fillKpiGrid(kpiSecondaryEl, [
+        ["Non-converted", biz.non_converted_sessions || 0],
+        ["Hit 5-msg budget", `${biz.hit_message_budget_sessions || 0} (${Math.round((biz.hit_message_budget_rate || 0) * 100)}%)`],
+        ["Budget (non-conv)", why.hit_message_budget || 0],
+        ["Tool failures (non-conv)", why.tool_failure || 0],
+        ["Slow latency (non-conv)", why.slow_latency || 0],
+        ["Weak RAG (non-conv)", why.rag_weak || 0],
+        ["Browse-only", why.browse_only || 0],
+        ["P95 latency", `${latency.p95_ms || 0} ms`],
+      ]);
+
+      fillKpiGrid(kpiEl, [
+        ["Sessions", totals.sessions || 0],
+        ["Turns", totals.turns || 0],
+        ["Tool failures", totals.tool_failures || 0],
+        ["Avg latency", `${latency.avg_ms || 0} ms`],
+        ["Avg TTFT", `${ttft.avg_ms || 0} ms`],
+        ["Retries", (conv.retries || {}).total || 0],
+        ["Avg loops", (conv.loops || {}).avg || 0],
+        ["Session tokens", totals.tokens || 0],
+        ["In / out tokens", `${totals.input_tokens || 0} / ${totals.output_tokens || 0}`],
+        ["Cost total", `$${cost.total || 0}`],
+        ["Cost / session", `$${cost.avg_per_session || 0}`],
+        ["Context relevance", `${Math.round((triad.context_relevance || 0) * 100)}%`],
+        ["Faithfulness", `${Math.round((triad.answer_faithfulness || 0) * 100)}%`],
+        ["Answer relevance", `${Math.round((triad.answer_relevance || 0) * 100)}%`],
+        ["RAG turn rate", `${Math.round((rag.retrieval_rate || 0) * 100)}%`],
+      ]);
+    }
+
+    function renderCharts(conv) {
+      const biz = conv.business || {};
+      doughnutChart(
+        "chart-conversion",
+        ["converted", "not converted"],
+        [biz.converted_sessions || 0, biz.non_converted_sessions || 0]
+      );
+
+      const mix = biz.successful_tool_mix || {};
+      const mixLabels = Object.keys(mix).map((name) => name.replaceAll("_", " "));
+      const mixValues = Object.keys(mix).map((name) => Math.round(((mix[name] || {}).rate || 0) * 100));
+      barChart(
+        "chart-tool-mix",
+        mixLabels.length ? mixLabels : ["none"],
+        mixValues.length ? mixValues : [0],
+        "% sessions"
+      );
+
+      const why = biz.why_not_converted || {};
+      barChart(
+        "chart-why-not",
+        ["5-msg budget", "tool failure", "slow latency", "weak RAG", "injection", "browse-only"],
+        [
+          why.hit_message_budget || 0,
+          why.tool_failure || 0,
+          why.slow_latency || 0,
+          why.rag_weak || 0,
+          why.injection_or_guardrail || 0,
+          why.browse_only || 0,
+        ],
+        "sessions"
+      );
+
+      const toolsPerSession = conv.tools_per_session || {};
+      barChart(
+        "chart-tools-session",
+        Object.keys(toolsPerSession),
+        Object.values(toolsPerSession),
+        "Sessions"
+      );
+
+      const outcomes = conv.outcomes || {};
+      doughnutChart("chart-outcomes", Object.keys(outcomes), Object.values(outcomes));
+
+      const failures = conv.tool_failures || {};
+      barChart(
+        "chart-tool-failures",
+        Object.keys(failures).length ? Object.keys(failures) : ["none"],
+        Object.keys(failures).length ? Object.values(failures) : [0],
+        "Failures"
+      );
+
+      const latency = conv.latency || {};
+      const ttft = conv.ttft || {};
+      barChart(
+        "chart-latency",
+        ["lat avg", "lat p50", "lat p95", "ttft avg", "ttft p50", "ttft p95"],
+        [
+          latency.avg_ms || 0,
+          latency.p50_ms || 0,
+          latency.p95_ms || 0,
+          ttft.avg_ms || 0,
+          ttft.p50_ms || 0,
+          ttft.p95_ms || 0,
+        ],
+        "ms"
+      );
+
+      const loops = conv.loops || {};
+      const retries = conv.retries || {};
+      barChart(
+        "chart-loops",
+        ["avg loops", "p95 loops", "avg retries", "total retries"],
+        [loops.avg || 0, loops.p95 || 0, retries.avg || 0, retries.total || 0],
+        "count"
+      );
+
+      const tokens = conv.tokens || {};
+      barChart(
+        "chart-tokens",
+        ["avg input", "avg output", "avg total"],
+        [tokens.avg_input || 0, tokens.avg_output || 0, tokens.avg_total || 0],
+        "tokens"
+      );
+
+      const rag = conv.rag || {};
+      const triadScores = (rag.triad || {}).scores || {};
+      barChart(
+        "chart-rag",
+        ["context relevance %", "faithfulness %", "answer relevance %", "citation %", "abstain %"],
+        [
+          Math.round((triadScores.context_relevance || 0) * 100),
+          Math.round((triadScores.answer_faithfulness || 0) * 100),
+          Math.round((triadScores.answer_relevance || 0) * 100),
+          Math.round(((rag.triad || {}).citation_rate || 0) * 100),
+          Math.round(((rag.triad || {}).abstain_rate || 0) * 100),
+        ],
+        "rag triad"
+      );
+
+      const sessions = (conv.sessions || []).slice(0, 8);
+      barChart(
+        "chart-cost-session",
+        sessions.map((s) => (s.thread_id || "").slice(0, 8) || "session"),
+        sessions.map((s) => s.cost_usd || 0),
+        "USD"
+      );
     }
 
     const palette = ["#0f6e56", "#243447", "#8a6414", "#8c2828", "#4d6b5c", "#6b5a4d", "#2f5d8a"];
@@ -302,123 +527,6 @@
         entries.length ? entries.map(([key]) => key) : ["none"],
         entries.length ? entries.map(([, row]) => Math.round(((row && row.avg) || 0) * 100)) : [0],
         "avg %"
-      );
-    }
-
-    function renderKpis(conv) {
-      const totals = conv.totals || {};
-      const latency = conv.latency || {};
-      const ttft = conv.ttft || {};
-      const cost = conv.cost || {};
-      const rag = conv.rag || {};
-      const triad = (rag.triad || {}).scores || {};
-      const items = [
-        ["Sessions", totals.sessions || 0],
-        ["Turns", totals.turns || 0],
-        ["Tool failures", totals.tool_failures || 0],
-        ["Avg latency", `${latency.avg_ms || 0} ms`],
-        ["Avg TTFT", `${ttft.avg_ms || 0} ms`],
-        ["P95 latency", `${latency.p95_ms || 0} ms`],
-        ["Retries", (conv.retries || {}).total || 0],
-        ["Avg loops", (conv.loops || {}).avg || 0],
-        ["Session tokens", totals.tokens || 0],
-        ["In / out tokens", `${totals.input_tokens || 0} / ${totals.output_tokens || 0}`],
-        ["Cost total", `$${cost.total || 0}`],
-        ["Cost / session", `$${cost.avg_per_session || 0}`],
-        ["Context relevance", `${Math.round((triad.context_relevance || 0) * 100)}%`],
-        ["Faithfulness", `${Math.round((triad.answer_faithfulness || 0) * 100)}%`],
-        ["Answer relevance", `${Math.round((triad.answer_relevance || 0) * 100)}%`],
-        ["RAG turn rate", `${Math.round((rag.retrieval_rate || 0) * 100)}%`],
-      ];
-      kpiEl.replaceChildren();
-      items.forEach(([label, value]) => {
-        const card = document.createElement("div");
-        card.className = "kpi-card";
-        const labelEl = document.createElement("p");
-        labelEl.className = "kpi-label";
-        labelEl.append(label + " ", tipButton(kpiTips[label] || "Operational health metric for this agent."));
-        const valueEl = document.createElement("p");
-        valueEl.className = "kpi-value";
-        valueEl.textContent = value;
-        card.append(labelEl, valueEl);
-        kpiEl.appendChild(card);
-      });
-    }
-
-    function renderCharts(conv) {
-      const toolsPerSession = conv.tools_per_session || {};
-      barChart(
-        "chart-tools-session",
-        Object.keys(toolsPerSession),
-        Object.values(toolsPerSession),
-        "Sessions"
-      );
-
-      const outcomes = conv.outcomes || {};
-      doughnutChart("chart-outcomes", Object.keys(outcomes), Object.values(outcomes));
-
-      const failures = conv.tool_failures || {};
-      barChart(
-        "chart-tool-failures",
-        Object.keys(failures).length ? Object.keys(failures) : ["none"],
-        Object.keys(failures).length ? Object.values(failures) : [0],
-        "Failures"
-      );
-
-      const latency = conv.latency || {};
-      const ttft = conv.ttft || {};
-      barChart(
-        "chart-latency",
-        ["lat avg", "lat p50", "lat p95", "ttft avg", "ttft p50", "ttft p95"],
-        [
-          latency.avg_ms || 0,
-          latency.p50_ms || 0,
-          latency.p95_ms || 0,
-          ttft.avg_ms || 0,
-          ttft.p50_ms || 0,
-          ttft.p95_ms || 0,
-        ],
-        "ms"
-      );
-
-      const loops = conv.loops || {};
-      const retries = conv.retries || {};
-      barChart(
-        "chart-loops",
-        ["avg loops", "p95 loops", "avg retries", "total retries"],
-        [loops.avg || 0, loops.p95 || 0, retries.avg || 0, retries.total || 0],
-        "count"
-      );
-
-      const tokens = conv.tokens || {};
-      barChart(
-        "chart-tokens",
-        ["avg input", "avg output", "avg total"],
-        [tokens.avg_input || 0, tokens.avg_output || 0, tokens.avg_total || 0],
-        "tokens"
-      );
-
-      const rag = conv.rag || {};
-      const triadScores = (rag.triad || {}).scores || {};
-      barChart(
-        "chart-rag",
-        ["context relevance %", "faithfulness %", "answer relevance %", "citation %", "abstain %"],
-        [
-          Math.round((triadScores.context_relevance || 0) * 100),
-          Math.round((triadScores.answer_faithfulness || 0) * 100),
-          Math.round((triadScores.answer_relevance || 0) * 100),
-          Math.round(((rag.triad || {}).citation_rate || 0) * 100),
-          Math.round(((rag.triad || {}).abstain_rate || 0) * 100),
-        ],
-        "rag triad"
-      );
-
-      const sessions = (conv.sessions || []).slice(0, 8);
-      barChart(
-        "chart-cost-session",
-        sessions.map((s) => (s.thread_id || "").slice(0, 8) || "session"),
-        sessions.map((s) => s.cost_usd || 0),
-        "USD"
       );
     }
 

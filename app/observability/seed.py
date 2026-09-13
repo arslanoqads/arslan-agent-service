@@ -1,8 +1,9 @@
 """Synthetic observability data so the public dashboard looks populated.
 
-Generates ~55 sessions across the past week with varied tools, outcomes,
-RAG triad proxies, and golden-set score points. Safe for showcase use —
-questions are already redacted-style and contain no real PII.
+Generates ~55 random sessions plus intentional scenario sessions (budget hit,
+slow latency, weak RAG, tool failure, conversion) across the past week with
+varied tools, outcomes, RAG triad proxies, and golden-set score points. Safe
+for showcase use — questions are already redacted-style and contain no real PII.
 """
 
 from __future__ import annotations
@@ -209,6 +210,147 @@ def build_demo_traces(*, sessions: int = SESSION_COUNT, now: datetime | None = N
                 "demo": True,
             }
             traces.append(trace)
+
+    # Intentional scenario sessions so business KPIs (conversion, budget, why-not)
+    # are visible even when random mix is light.
+    scenario_specs = [
+        {
+            "suffix": "budget",
+            "turns": 5,
+            "prompts": [
+                ("hello", [], "success", "completed", False, 900),
+                ("tell me about him", ["query_arslan_profile"], "success", "completed", False, 1100),
+                ("What AI products has Arslan shipped?", ["query_arslan_profile"], "success", "completed", False, 1400),
+                ("Share LinkedIn and website links", ["get_social_links"], "success", "completed", False, 1000),
+                ("one more question about his stack", ["query_arslan_profile"], "guardrail", "budget", False, 200),
+            ],
+        },
+        {
+            "suffix": "budget-2",
+            "turns": 5,
+            "prompts": [
+                ("hello", [], "success", "completed", False, 800),
+                ("What skills does Arslan list for AI product and agents?", ["query_arslan_profile"], "success", "completed", False, 1200),
+                ("Summarize his agent / LLM systems experience with citations.", ["query_arslan_profile"], "success", "completed", False, 1500),
+                ("Did he work on Honda battery diagnostics?", ["query_arslan_profile"], "success", "completed", False, 1300),
+                ("compare another JD please", ["match_role_evidence"], "guardrail", "budget", False, 180),
+            ],
+        },
+        {
+            "suffix": "slow",
+            "turns": 2,
+            "prompts": [
+                ("tell me about him", ["query_arslan_profile"], "success", "completed", False, 4800),
+                ("What AI products has Arslan shipped?", ["query_arslan_profile"], "success", "completed", False, 5100),
+            ],
+        },
+        {
+            "suffix": "weak-rag",
+            "turns": 2,
+            "prompts": [
+                ("What AI products has Arslan shipped?", ["query_arslan_profile"], "success", "completed", True, 1600),
+                ("Compare this role to the resume: AI product manager who ships agents.", ["match_role_evidence"], "success", "completed", True, 1800),
+            ],
+        },
+        {
+            "suffix": "tool-fail",
+            "turns": 2,
+            "prompts": [
+                ("send me your resume at [redacted-email]", ["send_resume_email"], "tool_error", "tool_error", False, 2200),
+                ("set up a meeting with me at 2:30 ET tomorrow for 15 mins at [redacted-email]", ["schedule_intro_call"], "tool_error", "tool_error", False, 2400),
+            ],
+        },
+        {
+            "suffix": "converted-both",
+            "turns": 2,
+            "prompts": [
+                ("send me your resume at [redacted-email]", ["send_resume_email"], "success", "completed", False, 900),
+                ("set up a meeting with me at 2:30 ET tomorrow for 15 mins at [redacted-email]", ["schedule_intro_call"], "success", "completed", False, 1100),
+            ],
+        },
+    ]
+    for s_idx, spec in enumerate(scenario_specs):
+        thread_id = f"demo-scenario-{spec['suffix']}"
+        base = now - timedelta(hours=2 + s_idx)
+        for turn_idx, (prompt, tools, outcome, stop_reason, weak_rag, duration) in enumerate(spec["prompts"]):
+            started = base + timedelta(minutes=turn_idx * 3)
+            status = "ok" if outcome == "success" else "error"
+            if stop_reason == "budget":
+                status = "ok"
+                tools = []
+                tool_status = []
+                error_kind = "guardrail"
+            elif outcome == "tool_error":
+                tool_status = [{"name": name, "status": "error"} for name in tools]
+                error_kind = "tool_error"
+            elif outcome == "guardrail":
+                tools = []
+                tool_status = []
+                error_kind = "guardrail"
+            else:
+                tool_status = [{"name": name, "status": "ok"} for name in tools]
+                error_kind = None
+
+            retrieval = bool({"query_arslan_profile", "match_role_evidence"} & set(tools))
+            rag_kind = "weak_context" if weak_rag else "healthy"
+            rag_triage = _rag_signals(rag_kind) if retrieval else None
+            retrieved = int((rag_triage or {}).get("retrieved_tokens") or 0)
+            cut = ["retrieved"] if weak_rag else []
+            input_tokens = 400 + turn_idx * 80
+            output_tokens = 80 + turn_idx * 20
+            cost = round((input_tokens * 0.0000025) + (output_tokens * 0.00001), 6)
+            traces.append(
+                {
+                    "id": f"demo-scenario-{spec['suffix']}-{turn_idx}",
+                    "thread_id": thread_id,
+                    "question": prompt,
+                    "status": status,
+                    "started_at": _iso(started),
+                    "ended_at": _iso(started + timedelta(milliseconds=duration)),
+                    "duration_ms": duration,
+                    "loop_count": 1,
+                    "attempt": 1,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "tools": tools,
+                    "tool_status": tool_status,
+                    "error": None if status == "ok" and stop_reason != "budget" else "demo scenario",
+                    "error_kind": error_kind,
+                    "route": "greeting" if prompt == "hello" else "portfolio",
+                    "stop_reason": stop_reason,
+                    "pipeline_version": "1",
+                    "prompt_version": "3",
+                    "model": "gpt-4o",
+                    "cost_usd": cost,
+                    "outcome": outcome if stop_reason != "budget" else "guardrail",
+                    "context_budget": {
+                        "system": 220,
+                        "tools": 80,
+                        "retrieved": retrieved,
+                        "history": 100,
+                        "reserved": 800,
+                        "used": 220 + 80 + retrieved + 100,
+                        "window": 8000,
+                        "cut": cut,
+                    },
+                    "rag_triage": rag_triage,
+                    "spans": [
+                        {
+                            "id": str(uuid.uuid4()),
+                            "name": "portfolio",
+                            "kind": "llm",
+                            "status": "ok",
+                            "ttft_ms": min(400, duration // 3),
+                            "duration_ms": max(50, duration - 50),
+                            "loop_index": 1,
+                            "attempt": 1,
+                            "input_tokens": input_tokens,
+                            "output_tokens": output_tokens,
+                        }
+                    ],
+                    "demo": True,
+                }
+            )
 
     # Marker so we do not reseed forever.
     traces.append(

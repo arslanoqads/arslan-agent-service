@@ -381,6 +381,92 @@ def _ttfts(trace: dict) -> list[float]:
     return values
 
 
+CONVERSION_TOOLS = {"send_resume_email", "schedule_intro_call"}
+TRACKED_SUCCESS_TOOLS = (
+    "send_resume_email",
+    "schedule_intro_call",
+    "match_role_evidence",
+    "query_arslan_profile",
+    "get_social_links",
+)
+RETRIEVAL_TOOLS = {"query_arslan_profile", "match_role_evidence"}
+SLOW_TURN_MS = 3500
+
+
+def _successful_tools(turn: dict) -> set[str]:
+    names = set()
+    for status in turn.get("tool_status") or []:
+        if status.get("status") == "ok" and status.get("name"):
+            names.add(status["name"])
+    return names
+
+
+def _session_business(turns: list[dict], latency_p95: float) -> dict:
+    successful: set[str] = set()
+    tool_failure = False
+    hit_budget = False
+    injection = False
+    slow = False
+    rag_weak = False
+    retrieval_used = False
+    for turn in turns:
+        successful |= _successful_tools(turn)
+        for status in turn.get("tool_status") or []:
+            if status.get("status") == "error":
+                tool_failure = True
+        stop = (turn.get("stop_reason") or "").lower()
+        if stop.startswith("budget") or stop == "budget":
+            hit_budget = True
+        if stop.startswith("injection") or (
+            turn.get("error_kind") == "guardrail" and "injection" in stop
+        ):
+            injection = True
+        if float(turn.get("duration_ms") or 0) >= max(SLOW_TURN_MS, latency_p95):
+            slow = True
+        tools = set(turn.get("tools") or [])
+        if tools & RETRIEVAL_TOOLS:
+            retrieval_used = True
+            triage = turn.get("rag_triage") or {}
+            scores = triage.get("scores") or {}
+            budget = turn.get("context_budget") or {}
+            cut = budget.get("cut") or []
+            cut_retrieved = bool(cut) if isinstance(cut, bool) else "retrieved" in cut
+            if (
+                cut_retrieved
+                or float(scores.get("context_relevance") or 1) < 0.45
+                or float(scores.get("answer_faithfulness") or 1) < 0.45
+                or float(scores.get("answer_relevance") or 1) < 0.45
+                or (triage and not triage.get("retrieval_ok", True))
+            ):
+                rag_weak = True
+
+    resume = "send_resume_email" in successful
+    appointment = "schedule_intro_call" in successful
+    converted = resume or appointment
+    browse_only = (
+        not converted
+        and not hit_budget
+        and not tool_failure
+        and not injection
+        and not slow
+        and not rag_weak
+    )
+    return {
+        "converted": converted,
+        "resume": resume,
+        "appointment": appointment,
+        "both": resume and appointment,
+        "successful_tools": successful,
+        "hit_budget": hit_budget,
+        "tool_failure": tool_failure,
+        "slow": slow,
+        "rag_weak": rag_weak and not converted,
+        "injection": injection,
+        "browse_only": browse_only,
+        "retrieval_used": retrieval_used,
+    }
+
+
 def conversation_metrics(traces: list[dict]) -> dict:
     """Session-aware dashboard metrics for the observability page."""
     finished = [item for item in traces if item.get("status") != "running"]
@@ -404,6 +490,29 @@ def conversation_metrics(traces: list[dict]) -> dict:
     rag_retrieved = []
     rag_cuts = 0
     turns_with_retrieval = 0
+
+    # First pass for latency p95 used in slow-session attribution.
+    for turns in sessions.values():
+        for turn in turns:
+            latencies.append(float(turn.get("duration_ms") or 0))
+    latency_p95 = _percentile(latencies, 95) if latencies else float(SLOW_TURN_MS)
+    latencies = []
+
+    converted = 0
+    resume_ok = 0
+    appointment_ok = 0
+    both_ok = 0
+    why_not = {
+        "hit_message_budget": 0,
+        "tool_failure": 0,
+        "slow_latency": 0,
+        "rag_weak": 0,
+        "injection_or_guardrail": 0,
+        "browse_only": 0,
+    }
+    success_tool_sessions = {name: 0 for name in TRACKED_SUCCESS_TOOLS}
+    successful_tool_counts = []
+    budget_hits_total = 0
 
     for session_id, turns in sessions.items():
         tools_unique = set()
@@ -444,13 +553,43 @@ def conversation_metrics(traces: list[dict]) -> dict:
             ttfts.extend(ttft_vals)
             session_ttft.extend(ttft_vals)
             budget = turn.get("context_budget") or {}
-            retrieval_tools = {"query_arslan_profile", "match_role_evidence"}
-            if retrieval_tools.intersection(names):
+            if RETRIEVAL_TOOLS.intersection(names):
                 rag_calls += 1
                 turns_with_retrieval += 1
                 rag_retrieved.append(float(budget.get("retrieved") or 0))
                 if budget.get("cut"):
                     rag_cuts += 1
+
+        biz = _session_business(turns, latency_p95)
+        if biz["converted"]:
+            converted += 1
+        if biz["resume"]:
+            resume_ok += 1
+        if biz["appointment"]:
+            appointment_ok += 1
+        if biz["both"]:
+            both_ok += 1
+        if biz["hit_budget"]:
+            budget_hits_total += 1
+        if not biz["converted"]:
+            if biz["hit_budget"]:
+                why_not["hit_message_budget"] += 1
+            if biz["tool_failure"]:
+                why_not["tool_failure"] += 1
+            if biz["slow"]:
+                why_not["slow_latency"] += 1
+            if biz["rag_weak"]:
+                why_not["rag_weak"] += 1
+            if biz["injection"]:
+                why_not["injection_or_guardrail"] += 1
+            if biz["browse_only"]:
+                why_not["browse_only"] += 1
+
+        for name in TRACKED_SUCCESS_TOOLS:
+            if name in biz["successful_tools"]:
+                success_tool_sessions[name] += 1
+        successful_tool_counts.append(len(biz["successful_tools"]))
+
         count_key = str(len(tools_unique)) if len(tools_unique) < 3 else "3+"
         if count_key not in tool_count_hist:
             count_key = "3+"
@@ -470,19 +609,59 @@ def conversation_metrics(traces: list[dict]) -> dict:
                 "loops": session_loops,
                 "retries": session_retries,
                 "avg_ttft_ms": _avg(session_ttft),
+                "converted": biz["converted"],
+                "resume": biz["resume"],
+                "appointment": biz["appointment"],
             }
         )
+
+    session_count = len(sessions) or 0
+    non_converted = max(0, session_count - converted)
+    why_not_rates = {
+        key: round(value / non_converted, 3) if non_converted else 0.0
+        for key, value in why_not.items()
+    }
+    successful_tool_mix = {
+        name: {
+            "sessions": success_tool_sessions[name],
+            "rate": round(success_tool_sessions[name] / session_count, 3) if session_count else 0.0,
+        }
+        for name in TRACKED_SUCCESS_TOOLS
+    }
 
     session_rows.sort(key=lambda row: row.get("cost_usd") or 0, reverse=True)
     return {
         "totals": {
-            "sessions": len(sessions),
+            "sessions": session_count,
             "turns": len(finished),
             "tool_failures": sum(tool_failures.values()),
             "input_tokens": int(sum(input_tokens)),
             "output_tokens": int(sum(output_tokens)),
             "tokens": int(sum(input_tokens) + sum(output_tokens)),
             "cost_usd": round(sum(costs), 6),
+        },
+        "business": {
+            "primary": "resume_or_appointment",
+            "note": (
+                "Primary success = session where send_resume_email or schedule_intro_call "
+                "completed successfully. Secondary metrics explain non-conversion."
+            ),
+            "sessions": session_count,
+            "converted_sessions": converted,
+            "non_converted_sessions": non_converted,
+            "conversion_rate": round(converted / session_count, 3) if session_count else 0.0,
+            "resume_sessions": resume_ok,
+            "appointment_sessions": appointment_ok,
+            "both_sessions": both_ok,
+            "resume_rate": round(resume_ok / session_count, 3) if session_count else 0.0,
+            "appointment_rate": round(appointment_ok / session_count, 3) if session_count else 0.0,
+            "both_rate": round(both_ok / session_count, 3) if session_count else 0.0,
+            "hit_message_budget_sessions": budget_hits_total,
+            "hit_message_budget_rate": round(budget_hits_total / session_count, 3) if session_count else 0.0,
+            "why_not_converted": why_not,
+            "why_not_converted_rates": why_not_rates,
+            "successful_tool_mix": successful_tool_mix,
+            "avg_successful_tools_per_session": _avg([float(v) for v in successful_tool_counts]),
         },
         "tools_per_session": tool_count_hist,
         "outcomes": outcomes,

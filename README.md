@@ -95,7 +95,7 @@ gcloud projects add-iam-policy-binding project-a4383faa-cfc2-4119-8d5 \
 
 Do this before the next merge to `main`. Cloud Run deploy reads those Secret Manager names and fails if they are missing.
 
-Private traces: open `/traces` and paste `OBSERVABILITY_TOKEN`. That page is not linked from the public chat. The chat panel shows the current turn only, without raw resume text.
+Private traces: open `/traces` for the public observability dashboard. Emails, phones, resume text, tool arguments, and raw errors are stripped before display.
 
 ## Golden set
 

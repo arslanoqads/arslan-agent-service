@@ -3,49 +3,52 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Traces · Arslan Agent</title>
+  <title>Observability · Arslan Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
+  <div class="bg" aria-hidden="true"></div>
   <main class="shell traces-page">
     <header class="top">
       <div class="brand">
         <p class="brand-mark">Observability</p>
-        <p class="brand-sub">Private trace dashboard. Not linked from the public chat.</p>
+        <p class="brand-sub">Public showcase of agent traces, latency, tokens, and tool usage. No resume text, emails, or phone numbers.</p>
       </div>
+      <nav class="links">
+        <a class="link" href="/">Chat</a>
+        <a class="link ghost" href="https://github.com/arslanoqads/arslan-agent-service" target="_blank" rel="noopener noreferrer">Repo</a>
+      </nav>
     </header>
     <section class="gate">
-      <label for="token">Observability token</label>
-      <input id="token" type="password" autocomplete="off" />
-      <button id="load" type="button">Load traces</button>
-      <p id="status" class="hint"></p>
+      <button id="load" type="button">Refresh traces</button>
+      <p id="status" class="hint">Loading public traces…</p>
+      <p class="hint">Emails, phones, blocked prompts, resume excerpts, tool arguments, and raw errors are stripped before display.</p>
     </section>
     <section class="summary" id="summary"></section>
     <section class="trace-list" id="list"></section>
-    <pre class="trace-detail" id="detail"></pre>
+    <pre class="trace-detail" id="detail">Select a trace to inspect the sanitized timeline.</pre>
   </main>
   <script>
-    const tokenInput = document.getElementById("token");
     const statusEl = document.getElementById("status");
     const summaryEl = document.getElementById("summary");
     const listEl = document.getElementById("list");
     const detailEl = document.getElementById("detail");
 
     async function load() {
-      const token = tokenInput.value.trim();
       statusEl.textContent = "Loading…";
-      const res = await fetch("/observability/traces", {
-        headers: { "X-Observability-Token": token },
-      });
+      const res = await fetch("/observability/traces");
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        statusEl.textContent = data.detail || "Unauthorized";
+        statusEl.textContent = data.detail || "Could not load traces";
         return;
       }
-      statusEl.textContent = `${(data.traces || []).length} traces`;
+      statusEl.textContent = `${(data.traces || []).length} public traces`;
       const summary = data.summary || {};
       const tools = Object.entries(summary.tools || {}).map(([name, count]) => `${name} ${count}`).join(", ") || "none";
-      summaryEl.textContent = `${summary.requests || 0} requests · avg ${summary.avg_duration_ms || 0} ms · avg ${summary.avg_tokens || 0} tokens · failure ${(summary.failure_rate || 0) * 100}% · cost/request $${summary.cost_per_request || 0} · cost/success $${summary.cost_per_success || 0} · unknown routes ${summary.unknown_routes || 0} · tools ${tools}`;
+      summaryEl.textContent = `${summary.requests || 0} requests · avg ${summary.avg_duration_ms || 0} ms · avg ${summary.avg_tokens || 0} tokens · failure ${(summary.failure_rate || 0) * 100}% · cost/request $${summary.cost_per_request || 0} · cost/success $${summary.cost_per_success || 0} · tools ${tools}`;
       listEl.replaceChildren();
       (data.traces || []).forEach((trace) => {
         const button = document.createElement("button");
@@ -53,27 +56,16 @@
         button.className = "trace-row";
         const tokens = (trace.input_tokens || 0) + (trace.output_tokens || 0);
         const toolsUsed = (trace.tools || []).join(", ") || "no tools";
-        button.textContent = `${trace.started_at || ""} · ${trace.status} · ${trace.duration_ms ?? "—"} ms · ${trace.loop_count || 0} loops · ${tokens} tokens · ${toolsUsed} · ${(trace.question || "").slice(0, 80)}`;
+        button.textContent = `${trace.started_at || ""} · ${trace.status} · ${trace.route || "unknown"} · ${trace.duration_ms ?? "—"} ms · ${trace.loop_count || 0} loops · ${tokens} tokens · ${toolsUsed} · ${(trace.question || "").slice(0, 80)}`;
         button.addEventListener("click", () => {
           detailEl.textContent = JSON.stringify(trace, null, 2);
-          const save = document.createElement("button");
-          save.type = "button";
-          save.className = "trace-row";
-          save.textContent = "Save unlabeled eval stub";
-          save.addEventListener("click", async () => {
-            const saved = await fetch(`/observability/traces/${trace.id}/eval-stub`, {
-              method: "POST",
-              headers: { "X-Observability-Token": token },
-            });
-            statusEl.textContent = saved.ok ? "Saved unlabeled production stub" : "Could not save stub";
-          });
-          listEl.prepend(save);
         });
         listEl.appendChild(button);
       });
     }
 
     document.getElementById("load").addEventListener("click", load);
+    load();
   </script>
 </body>
 </html>

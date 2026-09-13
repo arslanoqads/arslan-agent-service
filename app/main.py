@@ -16,7 +16,7 @@ from app.guardrails import (
     enforce_limit,
     release_question,
 )
-from app.observability.model import public_trace
+from app.observability.model import public_question, public_trace
 from app.observability.store import get_store, summary
 from app.runtime.errors import public_error_message
 from app.runtime.runner import record_guardrail, stream_turn
@@ -148,10 +148,24 @@ async def chat_stream(query: ChatQuery, request: Request):
 
 
 @app.get("/observability/traces")
-def list_traces(request: Request):
-    require_observability(request)
-    traces = _store.list_traces()
-    return {"traces": traces, "summary": summary(traces)}
+def list_traces():
+    traces = [public_trace(item) for item in _store.list_traces()]
+    return {
+        "traces": traces,
+        "summary": summary(traces),
+        "privacy": (
+            "Public showcase view. Emails, phones, resume text, tool arguments, "
+            "and raw errors are removed."
+        ),
+    }
+
+
+@app.get("/observability/traces/{trace_id}")
+def get_trace(trace_id: str):
+    trace = _store.get(trace_id)
+    if not trace:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    return public_trace(trace)
 
 
 @app.post("/observability/traces/{trace_id}/eval-stub")
@@ -168,7 +182,7 @@ def save_eval_stub(trace_id: str, request: Request):
         {
             "id": f"trace-{trace_id[:8]}",
             "family": "POS",
-            "input": trace.get("question") or "",
+            "input": public_question(trace.get("question") or ""),
             "expected_tool": "none",
             "tools_called": trace.get("tools") or [],
             "must_include": [],
@@ -182,12 +196,3 @@ def save_eval_stub(trace_id: str, request: Request):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(cases, indent=2) + "\n")
     return {"saved": str(path), "id": cases[-1]["id"]}
-
-
-@app.get("/observability/traces/{trace_id}")
-def get_trace(trace_id: str, request: Request):
-    require_observability(request)
-    trace = _store.get(trace_id)
-    if not trace:
-        raise HTTPException(status_code=404, detail="Trace not found")
-    return trace

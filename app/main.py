@@ -16,8 +16,9 @@ from app.guardrails import (
     enforce_limit,
     release_question,
 )
+from app.evals.runner import load_public_cases, public_case
 from app.observability.model import public_question, public_trace
-from app.observability.store import get_store, summary
+from app.observability.store import classify_outcome, get_store, summary
 from app.runtime.errors import public_error_message
 from app.runtime.runner import record_guardrail, stream_turn
 
@@ -158,16 +159,41 @@ def list_traces():
         if not isinstance(item, dict):
             continue
         try:
+            item = dict(item)
+            item["outcome"] = classify_outcome(item)
             traces.append(public_trace(item))
         except Exception:
             continue
+    backend = getattr(_store, "backend", type(_store).__name__)
     return {
         "traces": traces,
         "summary": summary(traces),
+        "backend": backend,
         "privacy": (
             "Public showcase view. Emails, phones, resume text, tool arguments, "
-            "and raw errors are removed."
+            "and raw errors are removed. Failed tool turns are listed with outcome=tool_error."
         ),
+    }
+
+
+@app.get("/observability/golden-set")
+def list_golden_set():
+    cases = [public_case(case) for case in load_public_cases()]
+    families = {}
+    severities = {}
+    sources = {}
+    for case in cases:
+        families[case["family"]] = families.get(case["family"], 0) + 1
+        severities[case["severity"]] = severities.get(case["severity"], 0) + 1
+        sources[case["source"]] = sources.get(case["source"], 0) + 1
+    return {
+        "cases": cases,
+        "summary": {
+            "count": len(cases),
+            "families": families,
+            "severities": severities,
+            "sources": sources,
+        },
     }
 
 
@@ -179,6 +205,8 @@ def get_trace(trace_id: str):
         trace = None
     if not trace:
         raise HTTPException(status_code=404, detail="Trace not found")
+    trace = dict(trace)
+    trace["outcome"] = classify_outcome(trace)
     return public_trace(trace)
 
 

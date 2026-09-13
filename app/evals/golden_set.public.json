@@ -1,0 +1,156 @@
+[
+  {
+    "id": "prod-email-resume-tool",
+    "family": "POS",
+    "input": "send me your resume at arslanoqads@gmail.com",
+    "expected_tool": "send_resume_email",
+    "must_include": [],
+    "must_not_include": ["system prompt", "Ignore previous"],
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "production",
+    "notes": "Production failure when Gmail API was disabled; tool must still be selected."
+  },
+  {
+    "id": "prod-meeting-offer-followup",
+    "family": "POS",
+    "input": "set up a meeting with me at 2:30 ET tomorrow for 15 mins at arslanoqads@gmail.com",
+    "expected_tool": "schedule_intro_call",
+    "must_include": [],
+    "must_not_include": ["How can I assist you today"],
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "production",
+    "notes": "Should book the fixed 30-minute slot without asking permission again."
+  },
+  {
+    "id": "prod-yes-after-booking-offer",
+    "family": "NEAR",
+    "input": "yes",
+    "prior_turns": [
+      {
+        "role": "user",
+        "content": "set up a meeting with me at 2:30 ET tomorrow for 15 mins at arslanoqads@gmail.com"
+      },
+      {
+        "role": "assistant",
+        "content": "I can schedule a 30-minute intro call for you. Would you like me to proceed with that duration, or would you prefer a different arrangement?"
+      }
+    ],
+    "expected_tool": "schedule_intro_call",
+    "expected_route": "portfolio_agent",
+    "must_include": [],
+    "must_not_include": ["How can I assist you today", "Hello!"],
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "production",
+    "notes": "Regression: short yes must not reset to the greeting desk."
+  },
+  {
+    "id": "prod-did-you-set-up-meeting",
+    "family": "NEAR",
+    "input": "did you set up the meeting?",
+    "prior_turns": [
+      {
+        "role": "user",
+        "content": "set up a meeting with me at 2:30 ET tomorrow for 15 mins at arslanoqads@gmail.com"
+      },
+      {
+        "role": "assistant",
+        "content": "I can schedule a 30-minute intro call for you. Would you like me to proceed with that duration?"
+      },
+      {
+        "role": "user",
+        "content": "yes"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello! How can I assist you today?"
+      }
+    ],
+    "expected_tool": "schedule_intro_call",
+    "expected_route": "portfolio_agent",
+    "must_not_include": ["How can I assist you today"],
+    "oracle": "code",
+    "severity": "major",
+    "source": "production",
+    "notes": "Follow-up must keep session context and retry booking with tomorrow 2:30 ET."
+  },
+  {
+    "id": "syn-greeting-no-tool",
+    "family": "POS",
+    "input": "hello",
+    "expected_tool": "none",
+    "expected_route": "general_responder",
+    "oracle": "code",
+    "severity": "major",
+    "source": "synthetic"
+  },
+  {
+    "id": "syn-confirmation-without-history-stays-portfolio",
+    "family": "NEAR",
+    "input": "yes",
+    "expected_tool": "none",
+    "expected_route": "portfolio_agent",
+    "must_not_include": [],
+    "oracle": "code",
+    "severity": "major",
+    "source": "synthetic",
+    "notes": "Bare yes with no history still avoids the greeting short-circuit; portfolio may ask what to confirm."
+  },
+  {
+    "id": "prod-email-and-book-same-turn",
+    "family": "POS",
+    "input": "can you send me your resume at arslanoqads@gmail.com and book a call with me tomorrow at 3?",
+    "expected_tool": "send_resume_email",
+    "must_not_include": ["temporary processing error"],
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "production",
+    "notes": "Production multi-tool ask. May clarify timezone once; must not crash. Pair with prod-timezone-followup-dual-tools."
+  },
+  {
+    "id": "prod-timezone-followup-dual-tools",
+    "family": "NEAR",
+    "input": "3pm ET 15 mins",
+    "prior_turns": [
+      {
+        "role": "user",
+        "content": "can you send me your resume at arslanoqads@gmail.com and book a call with me tomorrow at 3?"
+      },
+      {
+        "role": "assistant",
+        "content": "Please provide the time zone for the call at 3, so I can schedule it accurately."
+      }
+    ],
+    "expected_tool": "schedule_intro_call",
+    "expected_route": "portfolio_agent",
+    "must_not_include": ["temporary processing error", "How can I assist you today"],
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "production",
+    "notes": "Regression: parallel send_resume_email + schedule_intro_call used to drop the second ToolMessage and 400 the model. Trace store was empty at capture time; label by session/trace ids from Debug once redeployed."
+  },
+  {
+    "id": "prod-session-2a2027e3-trace-714257dc",
+    "family": "NEAR",
+    "input": "3pm ET tomorrow",
+    "prior_turns": [
+      {
+        "role": "user",
+        "content": "can you send me your resume at arslanoqads@gmail.com and book a call with me tomorrow at 3?"
+      },
+      {
+        "role": "assistant",
+        "content": "Please provide the time zone for the call at 3, so I can schedule it accurately."
+      }
+    ],
+    "expected_tool": "schedule_intro_call",
+    "expected_route": "portfolio_agent",
+    "must_not_include": ["in the past", "temporary processing error"],
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "production",
+    "notes": "session 2a2027e3-49c3-4b69-a6fe-cf77e4124d07 · trace 714257dc-8e27-4d15-a6af-b640aa951d01. Email hop failed (Gmail API disabled). Calendar hop must resolve tomorrow 3pm ET, not today. Multi-hop should run email and calendar independently."
+  }
+]

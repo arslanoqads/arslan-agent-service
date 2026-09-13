@@ -425,10 +425,58 @@ def test_thread_store_roundtrip(tmp_path, monkeypatch):
     assert messages[-1].content == "Booking now."
 
 
-def test_golden_set_scaffold_and_routes():
-    from app.evals.runner import run
+def test_composite_store_keeps_failed_traces(tmp_path, monkeypatch):
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    monkeypatch.delenv("TRACE_BACKEND", raising=False)
+    monkeypatch.setenv("TRACE_SQLITE_PATH", str(tmp_path / "traces.sqlite"))
+    import app.observability.store as store_mod
 
-    assert run() == 0
+    store_mod._store = None
+    store_mod._memory = store_mod.MemoryTraceStore()
+    store = store_mod.get_store()
+
+    class Boom:
+        def save(self, trace):
+            raise RuntimeError("firestore down")
+
+        def get(self, trace_id):
+            return None
+
+        def list_traces(self, limit=50):
+            raise RuntimeError("firestore down")
+
+    store.durable = Boom()
+    failed = {
+        "id": "fail-1",
+        "started_at": "2026-09-13T20:00:00+00:00",
+        "status": "error",
+        "outcome": "tool_error",
+        "tools": ["send_resume_email"],
+        "tool_status": [{"name": "send_resume_email", "status": "error"}],
+        "spans": [],
+    }
+    store.save(failed)
+    listed = store.list_traces()
+    assert listed[0]["id"] == "fail-1"
+    assert listed[0]["outcome"] == "tool_error"
+
+
+def test_public_golden_set_endpoint(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-used")
+    monkeypatch.setenv("TRACE_SQLITE_PATH", str(tmp_path / "traces.sqlite"))
+    monkeypatch.setenv("TRACE_BACKEND", "sqlite")
+    monkeypatch.setenv("GUARD_MODEL_ENABLED", "0")
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    client = TestClient(app)
+    res = client.get("/observability/golden-set")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["summary"]["count"] >= 1
+    first = data["cases"][0]
+    assert {"id", "family", "severity", "source", "expected_tool"} <= set(first.keys())
 
 
 def test_public_error_message_hides_openai_dump():

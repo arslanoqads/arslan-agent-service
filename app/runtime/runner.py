@@ -79,6 +79,21 @@ def finish_trace(trace: dict, *, status: str, started: float, error: str | None 
     trace["cost_usd"] = estimate_usd(MODEL_NAME, trace.get("input_tokens") or 0, trace.get("output_tokens") or 0)
     trace["ended_at"] = datetime.now(timezone.utc).isoformat()
     trace["duration_ms"] = round((time.perf_counter() - started) * 1000)
+    tool_statuses = [item.get("status") for item in trace.get("tool_status") or []]
+    if status == "error":
+        trace["outcome"] = "processing_error"
+    elif trace.get("error_kind") == "guardrail":
+        trace["outcome"] = "guardrail"
+    elif "error" in tool_statuses:
+        trace["outcome"] = "tool_error"
+        # Keep visitor-facing chat ok, but mark the stored trace as failed for observability.
+        trace["status"] = "error"
+        if not trace.get("error_kind"):
+            trace["error_kind"] = "tool_error"
+    elif "refused" in tool_statuses:
+        trace["outcome"] = "tool_refused"
+    else:
+        trace["outcome"] = "success"
 
 
 def _embed(text: str):

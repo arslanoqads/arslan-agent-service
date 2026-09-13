@@ -61,6 +61,7 @@ def new_trace(thread_id: str, question: str) -> dict:
         "model": "gpt-4o",
         "cost_usd": 0.0,
         "cache": None,
+        "outcome": None,
         "context_budget": {},
         "tool_status": [],
         "spans": [],
@@ -175,6 +176,7 @@ def public_trace(trace: dict) -> dict:
         "route": trace.get("route") or "unknown",
         "stop_reason": trace.get("stop_reason"),
         "error_kind": trace.get("error_kind"),
+        "outcome": trace.get("outcome") or "success",
         "cost_usd": trace.get("cost_usd") or 0.0,
         "tools": [redact(name) for name in trace.get("tools", []) or []],
         "tool_status": [

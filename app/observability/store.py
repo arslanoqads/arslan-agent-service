@@ -401,6 +401,82 @@ def _successful_tools(turn: dict) -> set[str]:
     return names
 
 
+def _cache_kind(turn: dict) -> str | None:
+    cache = turn.get("cache") or {}
+    kind = str(cache.get("kind") or "").lower()
+    if kind in {"exact", "semantic"}:
+        return kind
+    stop = (turn.get("stop_reason") or "").lower()
+    if stop.startswith("cache_exact") or stop == "exact_cache":
+        return "exact"
+    if stop.startswith("cache_semantic") or stop == "semantic_cache":
+        return "semantic"
+    return None
+
+
+def _cache_metrics(finished: list[dict]) -> dict:
+    """Exact/semantic cache hit rates and estimated USD avoided."""
+    exact_hits = 0
+    semantic_hits = 0
+    uncached_costs: list[float] = []
+    stamped_exact = 0.0
+    stamped_semantic = 0.0
+    stamped_exact_n = 0
+    stamped_semantic_n = 0
+    for turn in finished:
+        kind = _cache_kind(turn)
+        cache = turn.get("cache") or {}
+        avoided = cache.get("avoided_cost_usd")
+        if kind == "exact":
+            exact_hits += 1
+            if avoided is not None:
+                stamped_exact += float(avoided)
+                stamped_exact_n += 1
+        elif kind == "semantic":
+            semantic_hits += 1
+            if avoided is not None:
+                stamped_semantic += float(avoided)
+                stamped_semantic_n += 1
+        else:
+            cost = float(turn.get("cost_usd") or 0)
+            if cost > 0:
+                uncached_costs.append(cost)
+
+    turn_count = len(finished)
+    hits = exact_hits + semantic_hits
+    avg_uncached = _avg(uncached_costs)
+    # Prefer per-hit stamped savings when present; else hits × avg uncached turn cost.
+    exact_savings = (
+        round(stamped_exact, 6)
+        if stamped_exact_n == exact_hits and exact_hits
+        else round(exact_hits * avg_uncached, 6)
+    )
+    semantic_savings = (
+        round(stamped_semantic, 6)
+        if stamped_semantic_n == semantic_hits and semantic_hits
+        else round(semantic_hits * avg_uncached, 6)
+    )
+    return {
+        "turns": turn_count,
+        "exact_hits": exact_hits,
+        "semantic_hits": semantic_hits,
+        "hits": hits,
+        "uncached_turns": max(0, turn_count - hits),
+        "exact_rate": round(exact_hits / turn_count, 3) if turn_count else 0.0,
+        "semantic_rate": round(semantic_hits / turn_count, 3) if turn_count else 0.0,
+        "hit_rate": round(hits / turn_count, 3) if turn_count else 0.0,
+        "avg_uncached_cost_usd": avg_uncached,
+        "exact_savings_usd": exact_savings,
+        "semantic_savings_usd": semantic_savings,
+        "estimated_savings_usd": round(exact_savings + semantic_savings, 6),
+        "note": (
+            "Cache rates are share of finished turns served from exact or semantic answer cache. "
+            "Savings estimate avoided LLM spend as hits × average cost of uncached turns "
+            "(or stamped avoided_cost_usd when present)."
+        ),
+    }
+
+
 def _session_business(turns: list[dict], latency_p95: float) -> dict:
     successful: set[str] = set()
     tool_failure = False
@@ -689,6 +765,7 @@ def conversation_metrics(traces: list[dict]) -> dict:
             "avg_per_session": _avg([row["cost_usd"] for row in session_rows]),
             "total": round(sum(costs), 6),
         },
+        "cache": _cache_metrics(finished),
         "rag": {
             "retrieval_turns": turns_with_retrieval,
             "retrieval_rate": round(turns_with_retrieval / len(finished), 3) if finished else 0,

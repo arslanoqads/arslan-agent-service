@@ -25,6 +25,20 @@ from app.tools.limits import current_thread_id, current_user_message
 # Durable turns are loaded from the thread store on every request.
 _graph = builder.compile()
 _store = None
+_avg_uncached_cost_usd = 0.008
+_avg_uncached_cost_n = 0
+
+
+def _remember_uncached_cost(cost: float) -> None:
+    global _avg_uncached_cost_usd, _avg_uncached_cost_n
+    if cost <= 0:
+        return
+    _avg_uncached_cost_n += 1
+    _avg_uncached_cost_usd += (cost - _avg_uncached_cost_usd) / _avg_uncached_cost_n
+
+
+def _estimated_cache_savings() -> float:
+    return round(_avg_uncached_cost_usd, 6)
 
 
 def store():
@@ -121,6 +135,8 @@ def finish_trace(trace: dict, *, status: str, started: float, error: str | None 
         trace["outcome"] = "tool_refused"
     else:
         trace["outcome"] = "success"
+    if not (trace.get("cache") or {}).get("kind") and (trace.get("cost_usd") or 0) > 0:
+        _remember_uncached_cost(float(trace["cost_usd"]))
 
 
 def _embed(text: str):
@@ -262,7 +278,12 @@ async def stream_turn(message: str, thread_id: str, *, client_ip: str | None = N
     cached = None if prior_turns else lookup(message, fingerprint, embed=_embed)
     if cached:
         cache_kind = cached.get("kind") or "exact"
-        trace["cache"] = {"kind": cache_kind, "similarity": cached.get("similarity")}
+        avoided = _estimated_cache_savings()
+        trace["cache"] = {
+            "kind": cache_kind,
+            "similarity": cached.get("similarity"),
+            "avoided_cost_usd": avoided,
+        }
         trace["tools"] = []
         yield complete_short(
             trace,

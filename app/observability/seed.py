@@ -120,10 +120,24 @@ def build_demo_traces(*, sessions: int = SESSION_COUNT, now: datetime | None = N
             outcome = desired
             status = "ok"
             tool_status = [{"name": name, "status": "ok"} for name in tools]
+            cache_kind = None
+            # Informational first-turn style answers may be served from exact/semantic cache.
+            if (
+                desired == "success"
+                and tools
+                and set(tools) <= {"query_arslan_profile", "get_social_links"}
+                and rng.random() < 0.18
+            ):
+                cache_kind = "exact" if rng.random() < 0.65 else "semantic"
+                tools = []
+                tool_status = []
             if desired == "guardrail":
                 status = "error"
                 tools = []
                 tool_status = []
+            elif cache_kind:
+                outcome = "success"
+                status = "ok"
             elif rng.random() < 0.08 and tools:
                 bad = tools[-1]
                 tool_status = [
@@ -141,15 +155,34 @@ def build_demo_traces(*, sessions: int = SESSION_COUNT, now: datetime | None = N
             retrieved = int((rag_triage or {}).get("retrieved_tokens") or 0)
             cut = ["retrieved"] if (rag_triage or {}).get("context_cut") else []
 
-            ttft = rng.randint(120, 900)
+            if cache_kind:
+                duration = rng.randint(40, 180)
+                loops = 0
+                attempt = 1
+                input_tokens = 0
+                output_tokens = 0
+                cost = 0.0
+                avoided = round(rng.uniform(0.004, 0.02), 6)
+                stop_reason = f"cache_{cache_kind}"
+                cache = {
+                    "kind": cache_kind,
+                    "similarity": 1.0 if cache_kind == "exact" else round(rng.uniform(0.95, 0.995), 4),
+                    "avoided_cost_usd": avoided,
+                }
+            else:
+                avoided = 0.0
+                stop_reason = "injection" if outcome == "guardrail" else "completed"
+                cache = None
+
+            ttft = rng.randint(120, 900) if not cache_kind else rng.randint(10, 40)
             spans = [
                 {
                     "id": str(uuid.uuid4()),
-                    "name": "portfolio",
-                    "kind": "llm",
+                    "name": f"{cache_kind}_cache" if cache_kind else "portfolio",
+                    "kind": "cache" if cache_kind else "llm",
                     "status": "ok",
                     "ttft_ms": ttft,
-                    "duration_ms": duration - 50,
+                    "duration_ms": duration - 50 if duration > 50 else duration,
                     "loop_index": loops,
                     "attempt": attempt,
                     "input_tokens": input_tokens,
@@ -188,12 +221,12 @@ def build_demo_traces(*, sessions: int = SESSION_COUNT, now: datetime | None = N
                 "error": None if status == "ok" else "demo seeded failure",
                 "error_kind": None if status == "ok" else ("guardrail" if outcome == "guardrail" else "tool_error"),
                 "route": "greeting" if prompt == "hello" else "portfolio",
-                "stop_reason": "injection" if outcome == "guardrail" else "completed",
+                "stop_reason": stop_reason,
                 "pipeline_version": "1",
                 "prompt_version": "3",
                 "model": "gpt-4o",
                 "cost_usd": cost,
-                "cache": {"kind": "exact", "similarity": 1.0} if rng.random() < 0.07 else None,
+                "cache": cache,
                 "outcome": outcome,
                 "context_budget": {
                     "system": 220,
@@ -268,6 +301,20 @@ def build_demo_traces(*, sessions: int = SESSION_COUNT, now: datetime | None = N
                 ("set up a meeting with me at 2:30 ET tomorrow for 15 mins at [redacted-email]", ["schedule_intro_call"], "success", "completed", False, 1100),
             ],
         },
+        {
+            "suffix": "exact-cache",
+            "turns": 1,
+            "prompts": [
+                ("What AI products has Arslan shipped?", [], "success", "cache_exact", False, 60),
+            ],
+        },
+        {
+            "suffix": "semantic-cache",
+            "turns": 1,
+            "prompts": [
+                ("Summarize his agent / LLM systems experience with citations.", [], "success", "cache_semantic", False, 70),
+            ],
+        },
     ]
     for s_idx, spec in enumerate(scenario_specs):
         thread_id = f"demo-scenario-{spec['suffix']}"
@@ -275,11 +322,23 @@ def build_demo_traces(*, sessions: int = SESSION_COUNT, now: datetime | None = N
         for turn_idx, (prompt, tools, outcome, stop_reason, weak_rag, duration) in enumerate(spec["prompts"]):
             started = base + timedelta(minutes=turn_idx * 3)
             status = "ok" if outcome == "success" else "error"
+            cache_payload = None
             if stop_reason == "budget":
                 status = "ok"
                 tools = []
                 tool_status = []
                 error_kind = "guardrail"
+            elif stop_reason in {"cache_exact", "cache_semantic"}:
+                status = "ok"
+                tools = []
+                tool_status = []
+                error_kind = None
+                kind = "exact" if stop_reason == "cache_exact" else "semantic"
+                cache_payload = {
+                    "kind": kind,
+                    "similarity": 1.0 if kind == "exact" else 0.97,
+                    "avoided_cost_usd": 0.012 if kind == "exact" else 0.011,
+                }
             elif outcome == "tool_error":
                 tool_status = [{"name": name, "status": "error"} for name in tools]
                 error_kind = "tool_error"
@@ -296,9 +355,20 @@ def build_demo_traces(*, sessions: int = SESSION_COUNT, now: datetime | None = N
             rag_triage = _rag_signals(rag_kind) if retrieval else None
             retrieved = int((rag_triage or {}).get("retrieved_tokens") or 0)
             cut = ["retrieved"] if weak_rag else []
-            input_tokens = 400 + turn_idx * 80
-            output_tokens = 80 + turn_idx * 20
-            cost = round((input_tokens * 0.0000025) + (output_tokens * 0.00001), 6)
+            if cache_payload:
+                input_tokens = 0
+                output_tokens = 0
+                cost = 0.0
+                loop_count = 0
+                span_kind = "cache"
+                span_name = f"{cache_payload['kind']}_cache"
+            else:
+                input_tokens = 400 + turn_idx * 80
+                output_tokens = 80 + turn_idx * 20
+                cost = round((input_tokens * 0.0000025) + (output_tokens * 0.00001), 6)
+                loop_count = 1
+                span_kind = "llm"
+                span_name = "portfolio"
             traces.append(
                 {
                     "id": f"demo-scenario-{spec['suffix']}-{turn_idx}",
@@ -308,7 +378,7 @@ def build_demo_traces(*, sessions: int = SESSION_COUNT, now: datetime | None = N
                     "started_at": _iso(started),
                     "ended_at": _iso(started + timedelta(milliseconds=duration)),
                     "duration_ms": duration,
-                    "loop_count": 1,
+                    "loop_count": loop_count,
                     "attempt": 1,
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
@@ -322,6 +392,7 @@ def build_demo_traces(*, sessions: int = SESSION_COUNT, now: datetime | None = N
                     "prompt_version": "3",
                     "model": "gpt-4o",
                     "cost_usd": cost,
+                    "cache": cache_payload,
                     "outcome": outcome if stop_reason != "budget" else "guardrail",
                     "context_budget": {
                         "system": 220,
@@ -337,12 +408,12 @@ def build_demo_traces(*, sessions: int = SESSION_COUNT, now: datetime | None = N
                     "spans": [
                         {
                             "id": str(uuid.uuid4()),
-                            "name": "portfolio",
-                            "kind": "llm",
+                            "name": span_name,
+                            "kind": span_kind,
                             "status": "ok",
-                            "ttft_ms": min(400, duration // 3),
-                            "duration_ms": max(50, duration - 50),
-                            "loop_index": 1,
+                            "ttft_ms": min(400, max(10, duration // 3)),
+                            "duration_ms": max(20, duration - 10),
+                            "loop_index": loop_count,
                             "attempt": 1,
                             "input_tokens": input_tokens,
                             "output_tokens": output_tokens,

@@ -283,6 +283,21 @@ def test_exact_and_semantic_cache_skip_actions():
     assert lookup("What is his background?", "next", embed) is None
 
 
+def test_prepare_model_messages_keeps_tool_pairs():
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from app.agent.graph import prepare_model_messages
+
+    human = HumanMessage(content="What have you done in AI?")
+    ai = AIMessage(content="", tool_calls=[{"name": "query_arslan_profile", "args": {"query": "AI"}, "id": "1"}])
+    tool = ToolMessage(content="Built agent systems.", tool_call_id="1")
+    orphan = ToolMessage(content="orphan", tool_call_id="x")
+    prepared = prepare_model_messages([orphan, human, ai, tool])
+    assert prepared[0] is human
+    assert prepared[1] is ai
+    assert prepared[2].content.startswith("Built agent")
+
+
 def test_links_question_is_not_an_action():
     from app.runtime.route import is_links_request
 

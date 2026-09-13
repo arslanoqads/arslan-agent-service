@@ -3,9 +3,22 @@ import uuid
 from datetime import datetime, timezone
 
 EMAIL_REDACTION = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+PHONE_REDACTION = re.compile(r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b")
+SSN_REDACTION = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 
 RETRIEVAL_TOOLS = {"query_arslan_profile", "match_role_evidence"}
 ROUTER_NODES = {"supervisor"}
+
+_BLOCKED_QUESTION_MARKERS = (
+    "ignore previous",
+    "system prompt",
+    "jailbreak",
+    "__import__",
+    "os.system",
+    "eval(",
+    "exec(",
+    "<script",
+)
 
 
 def now_iso() -> str:
@@ -99,7 +112,20 @@ def persisted_trace(trace: dict) -> dict:
 
 
 def redact(value: str) -> str:
-    return EMAIL_REDACTION.sub("[redacted-email]", value or "")
+    text = EMAIL_REDACTION.sub("[redacted-email]", value or "")
+    text = PHONE_REDACTION.sub("[redacted-phone]", text)
+    return SSN_REDACTION.sub("[redacted]", text)
+
+
+def public_question(question: str) -> str:
+    text = (question or "").strip()
+    lowered = text.lower()
+    if any(marker in lowered for marker in _BLOCKED_QUESTION_MARKERS):
+        return "[redacted: blocked request]"
+    cleaned = redact(text)
+    if len(cleaned) > 140:
+        cleaned = cleaned[:137].rstrip() + "..."
+    return cleaned
 
 
 def public_span(span: dict) -> dict:
@@ -117,14 +143,25 @@ def public_span(span: dict) -> dict:
 
 
 def public_trace(trace: dict) -> dict:
+    """Sanitized trace for public chat and the public observability dashboard."""
     return {
         "id": trace["id"],
+        "started_at": trace.get("started_at"),
+        "ended_at": trace.get("ended_at"),
         "status": trace["status"],
+        "question": public_question(trace.get("question") or ""),
         "loop_count": trace.get("loop_count", 0),
         "attempt": trace.get("attempt", 0),
         "input_tokens": trace.get("input_tokens", 0),
         "output_tokens": trace.get("output_tokens", 0),
         "duration_ms": trace.get("duration_ms"),
+        "model": trace.get("model"),
+        "pipeline_version": trace.get("pipeline_version"),
+        "prompt_version": trace.get("prompt_version"),
+        "route": trace.get("route") or "unknown",
+        "stop_reason": trace.get("stop_reason"),
+        "error_kind": trace.get("error_kind"),
+        "cost_usd": trace.get("cost_usd") or 0.0,
         "tools": [redact(name) for name in trace.get("tools", [])],
         "tool_status": [
             {"name": redact(item.get("name") or ""), "status": item.get("status")}
@@ -135,9 +172,9 @@ def public_trace(trace: dict) -> dict:
             for key, value in (trace.get("context_budget") or {}).items()
             if key in {"system", "tools", "retrieved", "history", "reserved", "used", "window", "cut"}
         },
-        "stop_reason": trace.get("stop_reason"),
-        "route": trace.get("route") or "unknown",
-        "cache": None if not trace.get("cache") else {
+        "cache": None
+        if not trace.get("cache")
+        else {
             "kind": trace["cache"].get("kind"),
             "similarity": trace["cache"].get("similarity"),
         },

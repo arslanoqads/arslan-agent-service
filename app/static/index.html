@@ -18,6 +18,7 @@
       <p class="brand-sub">Multi-agent portfolio assistant · RAG + tools · Cloud Run</p>
     </div>
     <nav class="links">
+      <a class="link" href="/traces">Observability</a>
       <a class="link" href="https://github.com/arslanoqads/arslan-agent-service" target="_blank" rel="noopener noreferrer">View repo</a>
       <a class="link ghost" href="/docs" target="_blank" rel="noopener noreferrer">API docs</a>
     </nav>
@@ -56,7 +57,7 @@
           Send
         </button>
       </form>
-      <p class="hint">Demo limit: 2 questions per IP to control budget. Session uses an in-memory <code>thread_id</code>.</p>
+      <p class="hint">Demo limit: 5 questions per IP every 30 minutes. Unsafe or injection attempts end the window immediately. Session uses an in-memory <code>thread_id</code>.</p>
     </section>
     <aside class="trace-panel" aria-live="polite">
       <div class="trace-head">

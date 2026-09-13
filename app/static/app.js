@@ -69,7 +69,7 @@
 
   addMessage(
     "system",
-    "Try a suggestion below. Demo limit: 2 questions per visitor to control budget."
+    "Try a suggestion below. Demo limit: 5 questions per visitor every 30 minutes."
   );
 
   suggestions?.addEventListener("click", (event) => {
@@ -106,8 +106,11 @@
       });
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
-        loading.remove();
-        addMessage("error", data.detail || `Request failed (${res.status})`);
+        loading.className = "msg error";
+        const detail = typeof data.detail === "string" ? data.detail : "Something went wrong. Please try again.";
+        loading.textContent = detail.includes("Error code") || detail.includes("{")
+          ? "Something went wrong. Please try again."
+          : detail;
         return;
       }
 
@@ -132,8 +135,8 @@
             loading.textContent = event.response || loading.textContent || "(empty response)";
             finished = true;
           } else if (event.type === "error") {
-            loading.remove();
-            addMessage("error", event.detail || "Request failed");
+            loading.className = "msg error";
+            loading.textContent = event.detail || "Something went wrong. Please try again.";
             finished = true;
           }
         }

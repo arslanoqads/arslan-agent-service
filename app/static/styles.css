@@ -103,8 +103,10 @@ body {
   border-color: var(--line);
 }
 
+.top, .foot { max-width: 1120px; }
+
 .shell {
-  max-width: 920px;
+  max-width: 1120px;
   margin: 0 auto;
   padding: 0.75rem 1.25rem 2rem;
   display: grid;
@@ -274,7 +276,7 @@ textarea:focus {
 }
 
 .foot {
-  max-width: 920px;
+  max-width: 1120px;
   margin: 0 auto 1.5rem;
   padding: 0 1.25rem;
   font-size: 0.85rem;
@@ -304,8 +306,102 @@ textarea:focus {
   to { opacity: 1; transform: translateY(0); }
 }
 
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 70%) minmax(220px, 30%);
+  gap: 1rem;
+  align-items: stretch;
+  min-height: 68vh;
+}
+
+.trace-panel, .gate, .summary, .trace-detail {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.trace-panel {
+  padding: 0.9rem 1rem 1rem;
+  min-height: 100%;
+}
+
+.budget {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.8rem;
+}
+
+.budget-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(26, 23, 20, 0.08);
+}
+
+.budget-bar span { display: block; height: 100%; }
+.budget-system { background: #0f6e56; }
+.budget-tools { background: #243447; }
+.budget-retrieved { background: #c47b2b; }
+.budget-history { background: #8a6a4f; }
+.budget-reserved { background: rgba(26, 23, 20, 0.18); }
+
+.budget-legend, .tool-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.trace-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+
+.trace-head p, .summary {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.trace-steps {
+  margin: 0.8rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.trace-steps li, .trace-row {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.55rem 0.7rem;
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 0.82rem;
+}
+
+.trace-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.traces-page { display: grid; gap: 1rem; }
+.gate { padding: 1rem; display: grid; gap: 0.55rem; }
+.gate input, .summary, .trace-detail { padding: 0.75rem; }
+.trace-detail {
+  min-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.trace-list { display: grid; gap: 0.45rem; }
+
 @media (max-width: 640px) {
   .top { flex-direction: column; }
   .intro h1 { max-width: none; }
   .messages { max-height: 48vh; }
+  .workspace { grid-template-columns: 1fr; }
 }

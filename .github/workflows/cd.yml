@@ -53,5 +53,5 @@ jobs:
             --memory=1Gi
             --cpu=1
             --timeout=300
-            --set-secrets=OPENAI_API_KEY=OPENAI_API_KEY:latest
-            --set-env-vars=RAG_GCS_BUCKET=${{ secrets.RAG_GCS_BUCKET }}
+            --set-secrets=OPENAI_API_KEY=OPENAI_API_KEY:latest,GOOGLE_OAUTH_CLIENT_ID=GOOGLE_OAUTH_CLIENT_ID:latest,GOOGLE_OAUTH_CLIENT_SECRET=GOOGLE_OAUTH_CLIENT_SECRET:latest,GOOGLE_REFRESH_TOKEN=GOOGLE_REFRESH_TOKEN:latest,GOOGLE_SENDER_EMAIL=GOOGLE_SENDER_EMAIL:latest,OBSERVABILITY_TOKEN=OBSERVABILITY_TOKEN:latest
+            --set-env-vars=RAG_GCS_BUCKET=${{ secrets.RAG_GCS_BUCKET }},PUBLIC_WEBSITE_URL=https://qads.us,PUBLIC_LINKEDIN_URL=https://www.linkedin.com/in/maqadri,PUBLIC_INSTAGRAM_URL=${{ secrets.PUBLIC_INSTAGRAM_URL }},PUBLIC_SUBSTACK_URL=${{ secrets.PUBLIC_SUBSTACK_URL }}

@@ -4,6 +4,7 @@ venv/
 
 # Environment Variables & Secrets
 .env
+client_secret.json
 
 # Python Cache & Artifacts
 __pycache__/
@@ -17,3 +18,11 @@ __pycache__/
 # Raw data: keep folder in git, keep PDFs private (local-only / GCS)
 data/raw/*
 !data/raw/.gitkeep
+
+#Docs
+docs/
+
+# Local traces and private eval labels
+data/traces.sqlite
+data/index/
+tests/evals/golden_set.private.json

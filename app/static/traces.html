@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Traces · Arslan Agent</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="shell traces-page">
+    <header class="top">
+      <div class="brand">
+        <p class="brand-mark">Observability</p>
+        <p class="brand-sub">Private trace dashboard. Not linked from the public chat.</p>
+      </div>
+    </header>
+    <section class="gate">
+      <label for="token">Observability token</label>
+      <input id="token" type="password" autocomplete="off" />
+      <button id="load" type="button">Load traces</button>
+      <p id="status" class="hint"></p>
+    </section>
+    <section class="summary" id="summary"></section>
+    <section class="trace-list" id="list"></section>
+    <pre class="trace-detail" id="detail"></pre>
+  </main>
+  <script>
+    const tokenInput = document.getElementById("token");
+    const statusEl = document.getElementById("status");
+    const summaryEl = document.getElementById("summary");
+    const listEl = document.getElementById("list");
+    const detailEl = document.getElementById("detail");
+
+    async function load() {
+      const token = tokenInput.value.trim();
+      statusEl.textContent = "Loading…";
+      const res = await fetch("/observability/traces", {
+        headers: { "X-Observability-Token": token },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        statusEl.textContent = data.detail || "Unauthorized";
+        return;
+      }
+      statusEl.textContent = `${(data.traces || []).length} traces`;
+      const summary = data.summary || {};
+      const tools = Object.entries(summary.tools || {}).map(([name, count]) => `${name} ${count}`).join(", ") || "none";
+      summaryEl.textContent = `${summary.requests || 0} requests · avg ${summary.avg_duration_ms || 0} ms · avg ${summary.avg_tokens || 0} tokens · failure ${(summary.failure_rate || 0) * 100}% · cost/request $${summary.cost_per_request || 0} · cost/success $${summary.cost_per_success || 0} · unknown routes ${summary.unknown_routes || 0} · tools ${tools}`;
+      listEl.replaceChildren();
+      (data.traces || []).forEach((trace) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "trace-row";
+        const tokens = (trace.input_tokens || 0) + (trace.output_tokens || 0);
+        const toolsUsed = (trace.tools || []).join(", ") || "no tools";
+        button.textContent = `${trace.started_at || ""} · ${trace.status} · ${trace.duration_ms ?? "—"} ms · ${trace.loop_count || 0} loops · ${tokens} tokens · ${toolsUsed} · ${(trace.question || "").slice(0, 80)}`;
+        button.addEventListener("click", () => {
+          detailEl.textContent = JSON.stringify(trace, null, 2);
+          const save = document.createElement("button");
+          save.type = "button";
+          save.className = "trace-row";
+          save.textContent = "Save unlabeled eval stub";
+          save.addEventListener("click", async () => {
+            const saved = await fetch(`/observability/traces/${trace.id}/eval-stub`, {
+              method: "POST",
+              headers: { "X-Observability-Token": token },
+            });
+            statusEl.textContent = saved.ok ? "Saved unlabeled production stub" : "Could not save stub";
+          });
+          listEl.prepend(save);
+        });
+        listEl.appendChild(button);
+      });
+    }
+
+    document.getElementById("load").addEventListener("click", load);
+  </script>
+</body>
+</html>

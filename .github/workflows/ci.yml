@@ -25,14 +25,11 @@ jobs:
       - name: Syntax check
         run: python -m compileall -q app
 
-      - name: Import cloud-safe tools
-        run: |
-          python - <<'PY'
-          from app.tools.system_tools import get_ram_usage, get_battery_status
-          assert "[SIMULATED]" in get_ram_usage.invoke({})
-          assert "[SIMULATED]" in get_battery_status.invoke({})
-          print("system_tools OK")
-          PY
+      - name: Deterministic contracts
+        run: python -m pytest tests/test_contracts.py -q
+
+      - name: Golden set scaffold
+        run: python -m app.evals.runner
 
       - name: Docker build
         run: docker build -t arslan-agent-service:ci .

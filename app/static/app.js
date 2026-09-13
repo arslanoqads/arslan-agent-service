@@ -98,7 +98,7 @@
 
   addMessage(
     "system",
-    "Start with one clear ask — resume Q&A, email delivery, a call time, JD match, or public links. Up to 10 emails and 10 calendar invites per session (resets after 15 minutes idle). Demo chat limit: 5 questions per visitor every 30 minutes."
+    "Start with one clear ask — resume Q&A, email delivery, a call time, JD match, or public links. Up to 10 emails and 10 calendar invites per session; one JD comparison per session (resets after 15 minutes idle). Demo chat limit: 5 questions per visitor every 30 minutes."
   );
 
   suggestions?.addEventListener("click", (event) => {

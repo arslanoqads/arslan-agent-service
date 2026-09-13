@@ -58,7 +58,9 @@ HOP_PROMPTS = {
         "Do not send email in this hop. Intro calls are always 30 minutes."
     ),
     "jd": (
-        "This hop is ONLY for job-fit evidence. Call match_role_evidence with the job description."
+        "This hop is ONLY for job-fit evidence. Call match_role_evidence once with a shortened "
+        "job description. One JD comparison is allowed per session; if already used, tell the "
+        "visitor to wait for the next session."
     ),
     "links": (
         "This hop is ONLY for public links. Call get_social_links."

@@ -19,6 +19,7 @@ from app.observability.model import new_trace as new_trace_record
 from app.tools.google_client import EMAIL_SUBJECT, EVENT_TITLE, build_resume_message, calendar_event_body
 from app.tools.actions import (
     format_social_links,
+    match_role_evidence,
     match_role_from_chunks,
     schedule_intro_call,
     send_resume_email,
@@ -197,6 +198,18 @@ def test_job_match_has_no_percentage_and_says_when_empty():
     assert "MATCH EVIDENCE" in filled
     assert "%" not in filled
     assert "94" not in filled
+
+
+def test_jd_match_one_per_session(monkeypatch):
+    monkeypatch.setattr(
+        "app.tools.actions.get_rag_engine",
+        lambda: type("Engine", (), {"retrieve_chunks": staticmethod(lambda *_args, **_kwargs: [{"text": "Built agents."}])})(),
+    )
+    first = match_role_evidence.invoke({"job_description": "AI product manager who ships agents"})
+    second = match_role_evidence.invoke({"job_description": "Another role about platform engineering"})
+    assert "MATCH EVIDENCE" in first
+    assert "already ran a job-description comparison" in second
+    assert "next session" in second
 
 
 def test_public_trace_hides_context_and_emails():

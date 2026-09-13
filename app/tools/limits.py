@@ -9,10 +9,11 @@ current_user_message: ContextVar[str] = ContextVar("current_user_message", defau
 
 MAX_EMAILS_PER_SESSION = 10
 MAX_CALENDAR_PER_SESSION = 10
+MAX_JD_PER_SESSION = 1
 SESSION_IDLE_SECONDS = 15 * 60
 MAX_TOOL_CALLS = 40
 
-# thread_id -> {emails, calendars, last_active, signatures}
+# thread_id -> {emails, calendars, jd_matches, last_active, signatures}
 _sessions: dict[str, dict] = {}
 _now = time.time
 
@@ -26,10 +27,11 @@ def _session(thread_id: str | None = None) -> dict:
     now = _now()
     state = _sessions.get(key)
     if state is None or (now - float(state.get("last_active") or 0)) > SESSION_IDLE_SECONDS:
-        state = {"emails": 0, "calendars": 0, "last_active": now, "signatures": []}
+        state = {"emails": 0, "calendars": 0, "jd_matches": 0, "last_active": now, "signatures": []}
         _sessions[key] = state
     else:
         state["last_active"] = now
+        state.setdefault("jd_matches", 0)
     return state
 
 
@@ -69,6 +71,25 @@ def release_calendar(thread_id: str | None = None) -> None:
     state = _session(thread_id)
     if state["calendars"] > 0:
         state["calendars"] -= 1
+
+
+def mark_jd_match(thread_id: str | None = None) -> str | None:
+    state = _session(thread_id)
+    if state["jd_matches"] >= MAX_JD_PER_SESSION:
+        minutes = SESSION_IDLE_SECONDS // 60
+        return (
+            "This session already ran a job-description comparison. "
+            f"Please wait for the next session (after {minutes} minutes of inactivity) "
+            "before comparing another role."
+        )
+    state["jd_matches"] += 1
+    return None
+
+
+def release_jd_match(thread_id: str | None = None) -> None:
+    state = _session(thread_id)
+    if state["jd_matches"] > 0:
+        state["jd_matches"] -= 1
 
 
 def note_tool_call(name: str, signature: str) -> str | None:

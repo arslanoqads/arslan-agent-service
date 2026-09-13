@@ -71,10 +71,18 @@
 
     <section class="rag-triage" id="ops-health">
       <h2 class="obs-title">Operational health <span class="info-tip" tabindex="0" data-tip="Supporting volume, cost, latency, and RAG health — context for conversion, not the primary success metric." aria-label="Why track this">i</span></h2>
-      <p class="hint">Volume, cost, and RAG health underneath the conversion story.</p>
+      <p class="hint">Volume, cost, cache savings, and RAG health underneath the conversion story.</p>
       <div class="kpi-grid" id="kpi"></div>
     </section>
     <section class="chart-grid">
+      <div class="chart-card" data-tip="Share of finished turns served from exact cache, semantic cache, or a live model call.">
+        <h3>Cache mix <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+        <canvas id="chart-cache"></canvas>
+      </div>
+      <div class="chart-card" data-tip="Estimated USD avoided by exact vs semantic cache (hits × avg uncached turn cost, or stamped avoided_cost).">
+        <h3>Cache $ saved <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
+        <canvas id="chart-cache-savings"></canvas>
+      </div>
       <div class="chart-card" data-tip="Distribution of how many distinct tools a session used (0/1/2/3+).">
         <h3>Tools per session <span class="info-tip" tabindex="0" aria-label="Why track this">i</span></h3>
         <canvas id="chart-tools-session"></canvas>
@@ -239,6 +247,12 @@
       "In / out tokens": "Prompt vs completion tokens.",
       "Cost total": "Estimated USD for listed turns.",
       "Cost / session": "Average USD per session.",
+      "Exact cache %": "Share of finished turns served from an exact normalized-question cache hit.",
+      "Semantic cache %": "Share of finished turns served from a near-duplicate embedding cache hit.",
+      "Cache hit %": "Exact + semantic cache hits as a share of finished turns.",
+      "Cache $ saved": "Estimated LLM spend avoided by cache hits (hits × avg uncached turn cost, or stamped avoided_cost).",
+      "Exact $ saved": "Estimated USD avoided by exact-cache hits alone.",
+      "Semantic $ saved": "Estimated USD avoided by semantic-cache hits alone.",
       "Context relevance": "RAG golden-set average: right docs fetched?",
       "Faithfulness": "RAG golden-set average: grounded or abstained?",
       "Answer relevance": "RAG golden-set average: addressed the ask?",
@@ -292,6 +306,7 @@
         ["P95 latency", `${latency.p95_ms || 0} ms`],
       ]);
 
+      const cache = conv.cache || {};
       fillKpiGrid(kpiEl, [
         ["Sessions", totals.sessions || 0],
         ["Turns", totals.turns || 0],
@@ -304,6 +319,12 @@
         ["In / out tokens", `${totals.input_tokens || 0} / ${totals.output_tokens || 0}`],
         ["Cost total", `$${cost.total || 0}`],
         ["Cost / session", `$${cost.avg_per_session || 0}`],
+        ["Exact cache %", `${Math.round((cache.exact_rate || 0) * 100)}%`],
+        ["Semantic cache %", `${Math.round((cache.semantic_rate || 0) * 100)}%`],
+        ["Cache hit %", `${Math.round((cache.hit_rate || 0) * 100)}%`],
+        ["Cache $ saved", `$${cache.estimated_savings_usd || 0}`],
+        ["Exact $ saved", `$${cache.exact_savings_usd || 0}`],
+        ["Semantic $ saved", `$${cache.semantic_savings_usd || 0}`],
         ["Context relevance", `${Math.round((triad.context_relevance || 0) * 100)}%`],
         ["Faithfulness", `${Math.round((triad.answer_faithfulness || 0) * 100)}%`],
         ["Answer relevance", `${Math.round((triad.answer_relevance || 0) * 100)}%`],
@@ -342,6 +363,23 @@
           why.browse_only || 0,
         ],
         "sessions"
+      );
+
+      const cache = conv.cache || {};
+      doughnutChart(
+        "chart-cache",
+        ["exact cache", "semantic cache", "uncached"],
+        [cache.exact_hits || 0, cache.semantic_hits || 0, cache.uncached_turns || 0]
+      );
+      barChart(
+        "chart-cache-savings",
+        ["exact $", "semantic $", "total $"],
+        [
+          cache.exact_savings_usd || 0,
+          cache.semantic_savings_usd || 0,
+          cache.estimated_savings_usd || 0,
+        ],
+        "USD"
       );
 
       const toolsPerSession = conv.tools_per_session || {};

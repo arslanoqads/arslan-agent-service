@@ -204,6 +204,7 @@ def public_trace(trace: dict) -> dict:
         else {
             "kind": trace["cache"].get("kind"),
             "similarity": trace["cache"].get("similarity"),
+            "avoided_cost_usd": trace["cache"].get("avoided_cost_usd"),
         },
         "spans": [public_span(span) for span in trace.get("spans", []) or []],
     }

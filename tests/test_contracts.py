@@ -240,9 +240,9 @@ def test_public_trace_hides_context_and_emails():
 
 def test_public_trace_includes_cache_kind():
     trace = new_trace_record("thread", "What is Arslan known for?")
-    trace["cache"] = {"kind": "semantic", "similarity": 0.97, "answer": "secret resume text"}
+    trace["cache"] = {"kind": "semantic", "similarity": 0.97, "answer": "secret resume text", "avoided_cost_usd": 0.01}
     public = public_trace(trace)
-    assert public["cache"] == {"kind": "semantic", "similarity": 0.97}
+    assert public["cache"] == {"kind": "semantic", "similarity": 0.97, "avoided_cost_usd": 0.01}
     assert "secret resume text" not in str(public)
 
 
@@ -928,6 +928,89 @@ def test_business_metrics_why_not_converted_and_budget():
     assert biz["successful_tool_mix"]["schedule_intro_call"]["sessions"] == 1
     assert biz["successful_tool_mix"]["get_social_links"]["sessions"] == 1
     assert biz["avg_successful_tools_per_session"] > 0
+
+
+def test_cache_hit_rates_and_savings():
+    from app.observability.store import conversation_metrics
+
+    traces = [
+        {
+            "id": "u1",
+            "thread_id": "a",
+            "status": "ok",
+            "duration_ms": 900,
+            "loop_count": 1,
+            "attempt": 1,
+            "input_tokens": 200,
+            "output_tokens": 80,
+            "cost_usd": 0.01,
+            "tools": ["query_arslan_profile"],
+            "tool_status": [{"name": "query_arslan_profile", "status": "ok"}],
+            "stop_reason": "completed",
+            "spans": [],
+            "context_budget": {},
+        },
+        {
+            "id": "c1",
+            "thread_id": "b",
+            "status": "ok",
+            "duration_ms": 40,
+            "loop_count": 0,
+            "attempt": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0.0,
+            "tools": [],
+            "tool_status": [],
+            "stop_reason": "cache_exact",
+            "cache": {"kind": "exact", "similarity": 1.0, "avoided_cost_usd": 0.01},
+            "spans": [],
+            "context_budget": {},
+        },
+        {
+            "id": "c2",
+            "thread_id": "c",
+            "status": "ok",
+            "duration_ms": 50,
+            "loop_count": 0,
+            "attempt": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0.0,
+            "tools": [],
+            "tool_status": [],
+            "stop_reason": "cache_semantic",
+            "cache": {"kind": "semantic", "similarity": 0.97, "avoided_cost_usd": 0.009},
+            "spans": [],
+            "context_budget": {},
+        },
+        {
+            "id": "u2",
+            "thread_id": "d",
+            "status": "ok",
+            "duration_ms": 800,
+            "loop_count": 1,
+            "attempt": 1,
+            "input_tokens": 180,
+            "output_tokens": 60,
+            "cost_usd": 0.008,
+            "tools": ["get_social_links"],
+            "tool_status": [{"name": "get_social_links", "status": "ok"}],
+            "stop_reason": "completed",
+            "spans": [],
+            "context_budget": {},
+        },
+    ]
+    cache = conversation_metrics(traces)["cache"]
+    assert cache["exact_hits"] == 1
+    assert cache["semantic_hits"] == 1
+    assert cache["hits"] == 2
+    assert cache["exact_rate"] == 0.25
+    assert cache["semantic_rate"] == 0.25
+    assert cache["hit_rate"] == 0.5
+    assert cache["exact_savings_usd"] == 0.01
+    assert cache["semantic_savings_usd"] == 0.009
+    assert cache["estimated_savings_usd"] == 0.019
 
 
 def test_rag_golden_triad_scores_by_focus():

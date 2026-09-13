@@ -1,3 +1,5 @@
+import hashlib
+import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -25,6 +27,13 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def client_ip_hash(ip: str | None) -> str:
+    """Stable non-reversible visitor key for scoping traces (never store raw IPs publicly)."""
+    text = (ip or "unknown").strip() or "unknown"
+    secret = os.getenv("OBSERVABILITY_TOKEN") or os.getenv("IP_HASH_SECRET") or "local-dev"
+    return hashlib.sha256(f"{secret}:{text}".encode("utf-8")).hexdigest()[:32]
+
+
 def _as_text(value) -> str | None:
     if value is None:
         return None
@@ -38,11 +47,12 @@ def _as_text(value) -> str | None:
     return str(value)
 
 
-def new_trace(thread_id: str, question: str) -> dict:
+def new_trace(thread_id: str, question: str, *, client_ip: str | None = None) -> dict:
     return {
         "id": str(uuid.uuid4()),
         "thread_id": thread_id,
         "question": question,
+        "client_ip_hash": client_ip_hash(client_ip) if client_ip is not None else None,
         "status": "running",
         "started_at": now_iso(),
         "ended_at": None,

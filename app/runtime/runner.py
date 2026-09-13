@@ -147,9 +147,9 @@ def complete_short(trace: dict, *, started: float, name: str, kind: str, output:
     return {"type": "done", "response": output, "trace": public_trace(trace), "trace_id": trace["id"]}
 
 
-def record_guardrail(thread_id: str, question: str, name: str, output: str):
+def record_guardrail(thread_id: str, question: str, name: str, output: str, *, client_ip: str | None = None):
     started = time.perf_counter()
-    trace = new_trace(thread_id, question)
+    trace = new_trace(thread_id, question, client_ip=client_ip)
     span = new_span(
         name=name,
         kind="guardrail",
@@ -169,8 +169,8 @@ def record_guardrail(thread_id: str, question: str, name: str, output: str):
     return trace
 
 
-async def stream_turn(message: str, thread_id: str):
-    trace = new_trace(thread_id, message)
+async def stream_turn(message: str, thread_id: str, *, client_ip: str | None = None):
+    trace = new_trace(thread_id, message, client_ip=client_ip)
     thread_token = current_thread_id.set(thread_id)
     message_token = current_user_message.set(message)
     started = time.perf_counter()

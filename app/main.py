@@ -19,7 +19,7 @@ from app.guardrails import (
 from app.evals.durable import get_golden_store
 from app.evals.metrics import aggregate_golden_metrics, match_scores
 from app.evals.runner import load_public_cases, public_case
-from app.observability.model import public_question, public_trace
+from app.observability.model import client_ip_hash, public_question, public_trace
 from app.observability.seed import seed_observability
 from app.observability.store import DEFAULT_LIST_LIMIT, classify_outcome, get_store, summary
 from app.runtime.errors import public_error_message
@@ -80,7 +80,7 @@ async def run_chat(query: ChatQuery, request: Request):
     ip = client_ip(request)
     blocked = consume_question(ip)
     if blocked:
-        trace = record_guardrail(query.thread_id, query.message, "budget", BUDGET_LIMIT_MESSAGE)
+        trace = record_guardrail(query.thread_id, query.message, "budget", BUDGET_LIMIT_MESSAGE, client_ip=ip)
         yield {
             "type": "done",
             "response": BUDGET_LIMIT_MESSAGE,
@@ -93,7 +93,7 @@ async def run_chat(query: ChatQuery, request: Request):
     if unsafe:
         enforce_limit(ip)
         refusal = INJECTION_REFUSAL
-        trace = record_guardrail(query.thread_id, query.message, f"injection:{category}", refusal)
+        trace = record_guardrail(query.thread_id, query.message, f"injection:{category}", refusal, client_ip=ip)
         yield {
             "type": "done",
             "response": refusal,
@@ -103,7 +103,7 @@ async def run_chat(query: ChatQuery, request: Request):
         return
 
     try:
-        async for event in stream_turn(query.message, query.thread_id):
+        async for event in stream_turn(query.message, query.thread_id, client_ip=ip):
             if event.get("type") == "error":
                 release_question(ip)
                 friendly = public_error_message(event.get("detail") or "")
@@ -162,18 +162,41 @@ def list_traces(request: Request):
         raw = _store.list_traces(DEFAULT_LIST_LIMIT) or []
     except Exception:
         raw = []
-    traces = []
+
+    visitor = client_ip_hash(client_ip(request))
+    metrics_raw = []
+    mine_raw = []
     for item in raw:
         if not isinstance(item, dict):
             continue
         if item.get("id") == "demo-seed-marker" or item.get("stop_reason") == "demo_seed":
             continue
         try:
-            item = dict(item)
-            item["outcome"] = classify_outcome(item)
+            row = dict(item)
+            row["outcome"] = classify_outcome(row)
+        except Exception:
+            continue
+        metrics_raw.append(row)
+        # Personal history: only this visitor's non-demo traces.
+        if row.get("demo"):
+            continue
+        if row.get("client_ip_hash") and row.get("client_ip_hash") == visitor:
+            mine_raw.append(row)
+
+    traces = []
+    for item in mine_raw:
+        try:
             traces.append(public_trace(item))
         except Exception:
             continue
+
+    metrics_public = []
+    for item in metrics_raw:
+        try:
+            metrics_public.append(public_trace(item))
+        except Exception:
+            continue
+
     backend = getattr(_store, "backend", type(_store).__name__)
     persistence = {}
     if hasattr(_store, "persistence_status"):
@@ -183,12 +206,15 @@ def list_traces(request: Request):
             persistence = {}
     return {
         "traces": traces,
-        "summary": summary(traces),
+        "summary": summary(metrics_public),
+        "mine_count": len(traces),
+        "scoped_to_visitor": True,
         "backend": backend,
         "persistence": persistence,
         "privacy": (
-            "Public showcase view. Emails, phones, resume text, tool arguments, "
-            "and raw errors are removed. Failed tool turns are listed with outcome=tool_error."
+            "Trace list is scoped to your current IP (hashed). Dashboard metrics may include "
+            "anonymized demo traffic. Emails, phones, resume text, tool arguments, and raw "
+            "errors are removed."
         ),
     }
 

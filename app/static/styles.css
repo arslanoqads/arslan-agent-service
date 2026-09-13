@@ -599,8 +599,25 @@ textarea:focus {
   background: rgba(15, 110, 86, 0.08);
 }
 
-.chart-wide {
-  grid-column: 1 / -1;
+.page-more {
+  margin-top: 0.65rem;
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.page-more:hover {
+  border-color: #0f6e56;
+}
+
+.page-more[hidden] {
+  display: none !important;
 }
 
 .golden-charts {

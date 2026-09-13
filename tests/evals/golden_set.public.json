@@ -2,10 +2,13 @@
   {
     "id": "prod-email-resume-tool",
     "family": "POS",
-    "input": "send me your resume at arslanoqads@gmail.com",
+    "input": "send me your resume at [redacted-email]",
     "expected_tool": "send_resume_email",
     "must_include": [],
-    "must_not_include": ["system prompt", "Ignore previous"],
+    "must_not_include": [
+      "system prompt",
+      "Ignore previous"
+    ],
     "oracle": "code",
     "severity": "blocker",
     "source": "production",
@@ -14,10 +17,12 @@
   {
     "id": "prod-meeting-offer-followup",
     "family": "POS",
-    "input": "set up a meeting with me at 2:30 ET tomorrow for 15 mins at arslanoqads@gmail.com",
+    "input": "set up a meeting with me at 2:30 ET tomorrow for 15 mins at [redacted-email]",
     "expected_tool": "schedule_intro_call",
     "must_include": [],
-    "must_not_include": ["How can I assist you today"],
+    "must_not_include": [
+      "How can I assist you today"
+    ],
     "oracle": "code",
     "severity": "blocker",
     "source": "production",
@@ -30,7 +35,7 @@
     "prior_turns": [
       {
         "role": "user",
-        "content": "set up a meeting with me at 2:30 ET tomorrow for 15 mins at arslanoqads@gmail.com"
+        "content": "set up a meeting with me at 2:30 ET tomorrow for 15 mins at [redacted-email]"
       },
       {
         "role": "assistant",
@@ -40,7 +45,10 @@
     "expected_tool": "schedule_intro_call",
     "expected_route": "portfolio_agent",
     "must_include": [],
-    "must_not_include": ["How can I assist you today", "Hello!"],
+    "must_not_include": [
+      "How can I assist you today",
+      "Hello!"
+    ],
     "oracle": "code",
     "severity": "blocker",
     "source": "production",
@@ -53,7 +61,7 @@
     "prior_turns": [
       {
         "role": "user",
-        "content": "set up a meeting with me at 2:30 ET tomorrow for 15 mins at arslanoqads@gmail.com"
+        "content": "set up a meeting with me at 2:30 ET tomorrow for 15 mins at [redacted-email]"
       },
       {
         "role": "assistant",
@@ -70,7 +78,9 @@
     ],
     "expected_tool": "schedule_intro_call",
     "expected_route": "portfolio_agent",
-    "must_not_include": ["How can I assist you today"],
+    "must_not_include": [
+      "How can I assist you today"
+    ],
     "oracle": "code",
     "severity": "major",
     "source": "production",
@@ -101,9 +111,11 @@
   {
     "id": "prod-email-and-book-same-turn",
     "family": "POS",
-    "input": "can you send me your resume at arslanoqads@gmail.com and book a call with me tomorrow at 3?",
+    "input": "can you send me your resume at [redacted-email] and book a call with me tomorrow at 3?",
     "expected_tool": "send_resume_email",
-    "must_not_include": ["temporary processing error"],
+    "must_not_include": [
+      "temporary processing error"
+    ],
     "oracle": "code",
     "severity": "blocker",
     "source": "production",
@@ -116,7 +128,7 @@
     "prior_turns": [
       {
         "role": "user",
-        "content": "can you send me your resume at arslanoqads@gmail.com and book a call with me tomorrow at 3?"
+        "content": "can you send me your resume at [redacted-email] and book a call with me tomorrow at 3?"
       },
       {
         "role": "assistant",
@@ -125,7 +137,10 @@
     ],
     "expected_tool": "schedule_intro_call",
     "expected_route": "portfolio_agent",
-    "must_not_include": ["temporary processing error", "How can I assist you today"],
+    "must_not_include": [
+      "temporary processing error",
+      "How can I assist you today"
+    ],
     "oracle": "code",
     "severity": "blocker",
     "source": "production",
@@ -138,7 +153,7 @@
     "prior_turns": [
       {
         "role": "user",
-        "content": "can you send me your resume at arslanoqads@gmail.com and book a call with me tomorrow at 3?"
+        "content": "can you send me your resume at [redacted-email] and book a call with me tomorrow at 3?"
       },
       {
         "role": "assistant",
@@ -147,10 +162,13 @@
     ],
     "expected_tool": "schedule_intro_call",
     "expected_route": "portfolio_agent",
-    "must_not_include": ["in the past", "temporary processing error"],
+    "must_not_include": [
+      "in the past",
+      "temporary processing error"
+    ],
     "oracle": "code",
     "severity": "blocker",
     "source": "production",
-    "notes": "session 2a2027e3-49c3-4b69-a6fe-cf77e4124d07 · trace 714257dc-8e27-4d15-a6af-b640aa951d01. Email hop failed (Gmail API disabled). Calendar hop must resolve tomorrow 3pm ET, not today. Multi-hop should run email and calendar independently."
+    "notes": "session 2a2027e3-49c3-4b69-a6fe-cf77e4124d07 \u00b7 trace 714257dc-8e27-4d15-a6af-b640aa951d01. Email hop failed (Gmail API disabled). Calendar hop must resolve tomorrow 3pm ET, not today. Multi-hop should run email and calendar independently."
   }
 ]

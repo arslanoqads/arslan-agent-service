@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <div class="bg" aria-hidden="true"></div>
@@ -15,7 +16,7 @@
     <header class="top">
       <div class="brand">
         <p class="brand-mark">Observability</p>
-        <p class="brand-sub">Public traces (including failures), outcomes, and the golden-set classification board.</p>
+        <p class="brand-sub">Session health, tool mix, latency, RAG triage, costs, and golden-set classifications. PII redacted.</p>
       </div>
       <nav class="links">
         <a class="link" href="/">Chat</a>
@@ -26,7 +27,18 @@
     <section class="gate">
       <button id="load" type="button">Refresh</button>
       <p id="status" class="hint">Loading public traces and golden set…</p>
-      <p class="hint">Emails, phones, blocked prompts, resume excerpts, tool arguments, and raw errors are stripped before display.</p>
+    </section>
+
+    <section class="kpi-grid" id="kpi"></section>
+    <section class="chart-grid">
+      <div class="chart-card"><h3>Tools per session</h3><canvas id="chart-tools-session"></canvas></div>
+      <div class="chart-card"><h3>Outcomes</h3><canvas id="chart-outcomes"></canvas></div>
+      <div class="chart-card"><h3>Tool failures</h3><canvas id="chart-tool-failures"></canvas></div>
+      <div class="chart-card"><h3>Latency & TTFT (ms)</h3><canvas id="chart-latency"></canvas></div>
+      <div class="chart-card"><h3>Loops & retries</h3><canvas id="chart-loops"></canvas></div>
+      <div class="chart-card"><h3>Tokens (avg)</h3><canvas id="chart-tokens"></canvas></div>
+      <div class="chart-card"><h3>RAG triage</h3><canvas id="chart-rag"></canvas></div>
+      <div class="chart-card"><h3>Cost per session (top)</h3><canvas id="chart-cost-session"></canvas></div>
     </section>
 
     <section class="summary" id="summary"></section>
@@ -34,7 +46,6 @@
     <section class="obs-grid">
       <div>
         <h2 class="obs-title">Traces</h2>
-        <p class="hint" id="trace-filter-hint">Failed tool turns show as outcome tool_error.</p>
         <div class="trace-list" id="list"></div>
       </div>
       <div>
@@ -53,12 +64,178 @@
     const goldenListEl = document.getElementById("golden-list");
     const goldenSummaryEl = document.getElementById("golden-summary");
     const detailEl = document.getElementById("detail");
+    const kpiEl = document.getElementById("kpi");
+    const charts = {};
+
+    const palette = ["#0f6e56", "#243447", "#8a6414", "#8c2828", "#4d6b5c", "#6b5a4d", "#2f5d8a"];
 
     function badge(text, kind) {
       const span = document.createElement("span");
       span.className = `badge badge-${kind || "neutral"}`;
       span.textContent = text;
       return span;
+    }
+
+    function destroyChart(id) {
+      if (charts[id]) {
+        charts[id].destroy();
+        delete charts[id];
+      }
+    }
+
+    function barChart(id, labels, values, label) {
+      destroyChart(id);
+      const ctx = document.getElementById(id);
+      if (!ctx) return;
+      charts[id] = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [{
+            label,
+            data: values,
+            backgroundColor: labels.map((_, i) => palette[i % palette.length]),
+            borderWidth: 0,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: "#5c534a", maxRotation: 0 }, grid: { display: false } },
+            y: { beginAtZero: true, ticks: { color: "#5c534a" }, grid: { color: "rgba(26,23,20,0.08)" } },
+          },
+        },
+      });
+    }
+
+    function doughnutChart(id, labels, values) {
+      destroyChart(id);
+      const ctx = document.getElementById(id);
+      if (!ctx) return;
+      charts[id] = new Chart(ctx, {
+        type: "doughnut",
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: labels.map((_, i) => palette[i % palette.length]),
+            borderWidth: 0,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: "bottom", labels: { color: "#5c534a", boxWidth: 12 } } },
+        },
+      });
+    }
+
+    function renderKpis(conv) {
+      const totals = conv.totals || {};
+      const latency = conv.latency || {};
+      const ttft = conv.ttft || {};
+      const cost = conv.cost || {};
+      const rag = conv.rag || {};
+      const items = [
+        ["Sessions", totals.sessions || 0],
+        ["Turns", totals.turns || 0],
+        ["Tool failures", totals.tool_failures || 0],
+        ["Avg latency", `${latency.avg_ms || 0} ms`],
+        ["Avg TTFT", `${ttft.avg_ms || 0} ms`],
+        ["P95 latency", `${latency.p95_ms || 0} ms`],
+        ["Retries", (conv.retries || {}).total || 0],
+        ["Avg loops", (conv.loops || {}).avg || 0],
+        ["Session tokens", totals.tokens || 0],
+        ["In / out tokens", `${totals.input_tokens || 0} / ${totals.output_tokens || 0}`],
+        ["Cost total", `$${cost.total || 0}`],
+        ["Cost / session", `$${cost.avg_per_session || 0}`],
+        ["RAG turn rate", `${Math.round((rag.retrieval_rate || 0) * 100)}%`],
+        ["RAG cut rate", `${Math.round((rag.context_cut_rate || 0) * 100)}%`],
+      ];
+      kpiEl.replaceChildren();
+      items.forEach(([label, value]) => {
+        const card = document.createElement("div");
+        card.className = "kpi-card";
+        card.innerHTML = `<p class="kpi-label">${label}</p><p class="kpi-value">${value}</p>`;
+        kpiEl.appendChild(card);
+      });
+    }
+
+    function renderCharts(conv) {
+      const toolsPerSession = conv.tools_per_session || {};
+      barChart(
+        "chart-tools-session",
+        Object.keys(toolsPerSession),
+        Object.values(toolsPerSession),
+        "Sessions"
+      );
+
+      const outcomes = conv.outcomes || {};
+      doughnutChart("chart-outcomes", Object.keys(outcomes), Object.values(outcomes));
+
+      const failures = conv.tool_failures || {};
+      barChart(
+        "chart-tool-failures",
+        Object.keys(failures).length ? Object.keys(failures) : ["none"],
+        Object.keys(failures).length ? Object.values(failures) : [0],
+        "Failures"
+      );
+
+      const latency = conv.latency || {};
+      const ttft = conv.ttft || {};
+      barChart(
+        "chart-latency",
+        ["lat avg", "lat p50", "lat p95", "ttft avg", "ttft p50", "ttft p95"],
+        [
+          latency.avg_ms || 0,
+          latency.p50_ms || 0,
+          latency.p95_ms || 0,
+          ttft.avg_ms || 0,
+          ttft.p50_ms || 0,
+          ttft.p95_ms || 0,
+        ],
+        "ms"
+      );
+
+      const loops = conv.loops || {};
+      const retries = conv.retries || {};
+      barChart(
+        "chart-loops",
+        ["avg loops", "p95 loops", "avg retries", "total retries"],
+        [loops.avg || 0, loops.p95 || 0, retries.avg || 0, retries.total || 0],
+        "count"
+      );
+
+      const tokens = conv.tokens || {};
+      barChart(
+        "chart-tokens",
+        ["avg input", "avg output", "avg total"],
+        [tokens.avg_input || 0, tokens.avg_output || 0, tokens.avg_total || 0],
+        "tokens"
+      );
+
+      const rag = conv.rag || {};
+      barChart(
+        "chart-rag",
+        ["retrieval turns", "retrieval rate %", "avg retrieved toks", "cut rate %"],
+        [
+          rag.retrieval_turns || 0,
+          Math.round((rag.retrieval_rate || 0) * 100),
+          rag.avg_retrieved_tokens || 0,
+          Math.round((rag.context_cut_rate || 0) * 100),
+        ],
+        "rag"
+      );
+
+      const sessions = (conv.sessions || []).slice(0, 8);
+      barChart(
+        "chart-cost-session",
+        sessions.map((s) => (s.thread_id || "").slice(0, 8) || "session"),
+        sessions.map((s) => s.cost_usd || 0),
+        "USD"
+      );
     }
 
     function renderTraceRow(trace) {
@@ -73,12 +250,12 @@
       head.append(
         badge(outcome, outcome.includes("error") ? "fail" : outcome === "success" ? "ok" : "warn"),
         badge(trace.status || "unknown", "neutral"),
-        badge(trace.route || "unknown", "neutral")
+        badge(`$${trace.cost_usd || 0}`, "neutral")
       );
       const body = document.createElement("div");
       body.className = "row-body";
       const session = trace.thread_id ? `session ${trace.thread_id} · ` : "";
-      body.textContent = `${session}trace ${trace.id || "?"} · ${trace.started_at || ""} · ${trace.duration_ms ?? "—"} ms · ${tokens} tokens · ${toolsUsed} · ${(trace.question || "").slice(0, 100)}`;
+      body.textContent = `${session}trace ${trace.id || "?"} · ${trace.duration_ms ?? "—"} ms · loops ${trace.loop_count || 0} · in/out ${trace.input_tokens || 0}/${trace.output_tokens || 0} · ${toolsUsed} · ${(trace.question || "").slice(0, 90)}`;
       button.append(head, body);
       button.addEventListener("click", () => {
         detailEl.textContent = JSON.stringify(trace, null, 2);
@@ -126,13 +303,15 @@
       }
 
       const traces = data.traces || [];
+      const conv = (data.summary || {}).conversation || {};
       const failed = traces.filter((t) => (t.outcome || "").includes("error") || t.status === "error");
-      statusEl.textContent = `${traces.length} traces (${failed.length} failed) · backend ${data.backend || "unknown"} · ${(golden.cases || []).length} golden cases`;
+      statusEl.textContent = `${traces.length} traces · ${(conv.totals || {}).sessions || 0} sessions · ${failed.length} failed · ${(golden.cases || []).length} golden cases`;
+
+      renderKpis(conv);
+      renderCharts(conv);
 
       const summary = data.summary || {};
-      const tools = Object.entries(summary.tools || {}).map(([name, count]) => `${name} ${count}`).join(", ") || "none";
-      const outcomes = Object.entries(summary.outcomes || {}).map(([name, count]) => `${name} ${count}`).join(", ") || "none";
-      summaryEl.textContent = `${summary.requests || 0} requests · failure ${(summary.failure_rate || 0) * 100}% · outcomes ${outcomes} · avg ${summary.avg_duration_ms || 0} ms · avg ${summary.avg_tokens || 0} tokens · tools ${tools}`;
+      summaryEl.textContent = `Failure rate ${Math.round((summary.failure_rate || 0) * 100)}% · avg turn ${summary.avg_duration_ms || 0} ms · avg tokens ${summary.avg_tokens || 0} · cost/request $${summary.cost_per_request || 0} · cost/success $${summary.cost_per_success || 0}`;
 
       listEl.replaceChildren();
       traces.forEach((trace) => listEl.appendChild(renderTraceRow(trace)));

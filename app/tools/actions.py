@@ -12,9 +12,11 @@ from app.tools.limits import (
     current_user_message,
     mark_calendar_booked,
     mark_email_sent,
+    mark_jd_match,
     note_tool_call,
     release_calendar,
     release_email,
+    release_jd_match,
 )
 from app.tools.profile_tools import get_rag_engine
 from app.tools.timeutil import resolve_intro_start
@@ -178,12 +180,25 @@ class JobMatchInput(BaseModel):
 
 @tool("match_role_evidence", args_schema=JobMatchInput)
 def match_role_evidence(job_description: str) -> str:
-    """Retrieves resume evidence for a job description. Does not invent a match score."""
+    """Retrieves resume evidence for a job description. One comparison per session. Does not invent a match score."""
     text = (job_description or "").strip()
     if not text:
         return "Provide a job description to compare against the resume."
-    chunks = [chunk["text"] for chunk in get_rag_engine().retrieve_chunks(text[:1500], job_match=True)]
-    return match_role_from_chunks(text, chunks)
+    blocked = note_tool_call("match_role_evidence", text[:80].lower())
+    if blocked == "tool_cap":
+        return "This session hit the tool call limit."
+    blocked = mark_jd_match()
+    if blocked:
+        return blocked
+    try:
+        chunks = [
+            chunk["text"]
+            for chunk in get_rag_engine().retrieve_chunks(text[:1200], job_match=True)
+        ]
+        return match_role_from_chunks(text[:1200], chunks)
+    except Exception as exc:
+        release_jd_match()
+        return f"Could not compare the job description right now: {exc}"
 
 
 @tool("get_social_links")

@@ -19,6 +19,7 @@ from app.observability.model import new_trace as new_trace_record
 from app.tools.google_client import EMAIL_SUBJECT, EVENT_TITLE, build_resume_message, calendar_event_body
 from app.tools.actions import (
     format_social_links,
+    match_role_evidence,
     match_role_from_chunks,
     schedule_intro_call,
     send_resume_email,
@@ -197,6 +198,18 @@ def test_job_match_has_no_percentage_and_says_when_empty():
     assert "MATCH EVIDENCE" in filled
     assert "%" not in filled
     assert "94" not in filled
+
+
+def test_jd_match_one_per_session(monkeypatch):
+    monkeypatch.setattr(
+        "app.tools.actions.get_rag_engine",
+        lambda: type("Engine", (), {"retrieve_chunks": staticmethod(lambda *_args, **_kwargs: [{"text": "Built agents."}])})(),
+    )
+    first = match_role_evidence.invoke({"job_description": "AI product manager who ships agents"})
+    second = match_role_evidence.invoke({"job_description": "Another role about platform engineering"})
+    assert "MATCH EVIDENCE" in first
+    assert "already ran a job-description comparison" in second
+    assert "next session" in second
 
 
 def test_public_trace_hides_context_and_emails():
@@ -549,8 +562,59 @@ def test_conversation_metrics_sessions_and_tools():
     assert metrics["tools_per_session"]["3+"] == 1
     assert metrics["totals"]["tool_failures"] == 1
     assert metrics["rag"]["retrieval_turns"] == 1
+    assert metrics["rag"]["triad"]["samples"] == 1
+    assert "context_relevance" in metrics["rag"]["triad"]["scores"]
+    assert "answer_faithfulness" in metrics["rag"]["triad"]["scores"]
+    assert "answer_relevance" in metrics["rag"]["triad"]["scores"]
+    assert metrics["rag"]["triad"]["playbook"]
     assert metrics["ttft"]["samples"] == 2
     assert metrics["sessions"][0]["tokens"] == 43
+
+
+def test_rag_triad_proxy_scores_citations_and_abstain():
+    from app.observability.rag_triad import annotate_rag_triage, diagnose, score_turn
+
+    cited = score_turn(
+        {
+            "retrieval_ok": True,
+            "retrieved_tokens": 80,
+            "context_cut": False,
+            "has_citation": True,
+            "abstained": False,
+            "multi_hop": False,
+            "outcome": "success",
+            "stop_reason": None,
+        }
+    )
+    assert cited["context_relevance"] >= 0.9
+    assert cited["answer_faithfulness"] >= 0.4
+    assert cited["answer_relevance"] >= 0.7
+
+    abstain = score_turn(
+        {
+            "retrieval_ok": True,
+            "retrieved_tokens": 10,
+            "context_cut": False,
+            "has_citation": False,
+            "abstained": True,
+            "multi_hop": False,
+            "outcome": "success",
+            "stop_reason": None,
+        }
+    )
+    assert abstain["answer_faithfulness"] >= 0.5
+
+    trace = {
+        "tools": ["query_arslan_profile"],
+        "tool_status": [{"name": "query_arslan_profile", "status": "ok"}],
+        "context_budget": {"retrieved": 60, "cut": []},
+        "loop_count": 1,
+        "outcome": "success",
+    }
+    payload = annotate_rag_triage(trace, "From resume v3, page 2: shipped agents. I don't know his salary.")
+    assert payload["has_citation"] is True
+    assert payload["abstained"] is True
+    assert diagnose(cited)["code"] in {"D", "E"}
 
 
 def test_public_error_message_hides_openai_dump():

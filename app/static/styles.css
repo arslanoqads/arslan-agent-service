@@ -481,6 +481,65 @@ textarea:focus {
   font-weight: 500;
 }
 
+.obs-subtitle {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.rag-triage {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 16px;
+  padding: 1rem 1.05rem 1.1rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.triad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.triad-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.triad-edge {
+  margin: 0.2rem 0 0.45rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.triad-meta {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 1rem;
+}
+
+.pattern-list,
+.playbook-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.pattern-row,
+.playbook-row {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+.pattern-row.active {
+  border-color: #0f6e56;
+  background: rgba(15, 110, 86, 0.08);
+}
+
 .row-head {
   display: flex;
   flex-wrap: wrap;
@@ -516,7 +575,7 @@ textarea:focus {
 .badge-neutral { background: rgba(26, 23, 20, 0.06); color: var(--muted); }
 
 @media (max-width: 900px) {
-  .obs-grid, .chart-grid { grid-template-columns: 1fr; }
+  .obs-grid, .chart-grid, .triad-grid, .triad-meta { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px) {

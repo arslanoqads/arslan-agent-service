@@ -79,6 +79,7 @@ def public_case(case: dict) -> dict:
         "oracle": case.get("oracle"),
         "expected_tool": case.get("expected_tool"),
         "expected_route": case.get("expected_route"),
+        "eval_focus": case.get("eval_focus"),
         "input": public_question(case.get("input") or ""),
         "prior_turns": [
             {

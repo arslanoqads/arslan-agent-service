@@ -551,6 +551,40 @@ def test_golden_store_merges_durable_cases(tmp_path, monkeypatch):
     assert len(cases) >= 2
 
 
+def test_demo_seed_builds_rich_week(tmp_path, monkeypatch):
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    monkeypatch.delenv("RAG_GCS_BUCKET", raising=False)
+    monkeypatch.setenv("TRACE_BACKEND", "sqlite")
+    monkeypatch.setenv("TRACE_SQLITE_PATH", str(tmp_path / "seed.sqlite"))
+    import app.evals.durable as durable
+    import app.observability.store as store_mod
+    from app.observability.seed import DEMO_MARKER_ID, seed_observability
+
+    store_mod._store = None
+    store_mod._memory = store_mod.MemoryTraceStore()
+    durable._store = durable.CompositeGoldenStore([])
+
+    first = seed_observability(force=True, sessions=55)
+    assert first["seeded"] is True
+    assert first["sessions"] == 55
+    assert first["traces"] >= 55
+    assert first["scores"] > 10
+
+    store = store_mod.get_store()
+    assert store.get(DEMO_MARKER_ID)
+    listed = [item for item in store.list_traces(250) if item.get("id") != DEMO_MARKER_ID]
+    assert len(listed) >= 55
+    assert any(item.get("rag_triage") for item in listed)
+    assert any(item.get("tools") for item in listed)
+
+    second = seed_observability(force=False, sessions=55)
+    assert second["seeded"] is False
+
+    metrics = store_mod.conversation_metrics(listed)
+    assert metrics["totals"]["sessions"] >= 50
+    assert metrics["rag"]["triad"]["samples"] > 0
+
+
 def test_golden_metrics_by_category_and_over_time():
     from app.evals.metrics import aggregate_golden_metrics
 

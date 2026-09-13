@@ -20,6 +20,7 @@ from app.evals.durable import get_golden_store
 from app.evals.metrics import aggregate_golden_metrics, match_scores
 from app.evals.runner import load_public_cases, public_case
 from app.observability.model import public_question, public_trace
+from app.observability.seed import seed_observability
 from app.observability.store import DEFAULT_LIST_LIMIT, classify_outcome, get_store, summary
 from app.runtime.errors import public_error_message
 from app.runtime.runner import record_guardrail, stream_turn
@@ -151,7 +152,12 @@ async def chat_stream(query: ChatQuery, request: Request):
 
 
 @app.get("/observability/traces")
-def list_traces():
+def list_traces(request: Request):
+    # Auto-seed a rich demo week when the durable store is empty (showcase).
+    try:
+        seed_observability(force=False)
+    except Exception:
+        pass
     try:
         raw = _store.list_traces(DEFAULT_LIST_LIMIT) or []
     except Exception:
@@ -159,6 +165,8 @@ def list_traces():
     traces = []
     for item in raw:
         if not isinstance(item, dict):
+            continue
+        if item.get("id") == "demo-seed-marker" or item.get("stop_reason") == "demo_seed":
             continue
         try:
             item = dict(item)
@@ -185,8 +193,21 @@ def list_traces():
     }
 
 
+@app.post("/observability/seed-demo")
+def seed_demo(request: Request):
+    """Token-protected: (re)populate demo sessions for the observability dashboard."""
+    require_observability(request)
+    force = (request.query_params.get("force") or "").lower() in {"1", "true", "yes"}
+    result = seed_observability(force=force, sessions=55)
+    return result
+
+
 @app.get("/observability/golden-set")
 def list_golden_set():
+    try:
+        seed_observability(force=False)
+    except Exception:
+        pass
     raw_cases = load_public_cases()
     cases = [public_case(case) for case in raw_cases]
     families = {}

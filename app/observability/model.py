@@ -188,6 +188,7 @@ def public_trace(trace: dict) -> dict:
             for key, value in (trace.get("context_budget") or {}).items()
             if key in {"system", "tools", "retrieved", "history", "reserved", "used", "window", "cut"}
         },
+        "rag_triage": _public_rag_triage(trace.get("rag_triage")),
         "cache": None
         if not trace.get("cache")
         else {
@@ -195,4 +196,23 @@ def public_trace(trace: dict) -> dict:
             "similarity": trace["cache"].get("similarity"),
         },
         "spans": [public_span(span) for span in trace.get("spans", []) or []],
+    }
+
+
+def _public_rag_triage(payload) -> dict | None:
+    if not isinstance(payload, dict):
+        return None
+    scores = payload.get("scores") or {}
+    return {
+        "retrieval_ok": bool(payload.get("retrieval_ok")),
+        "retrieved_tokens": int(payload.get("retrieved_tokens") or 0),
+        "context_cut": bool(payload.get("context_cut")),
+        "has_citation": bool(payload.get("has_citation")),
+        "abstained": bool(payload.get("abstained")),
+        "multi_hop": bool(payload.get("multi_hop")),
+        "scores": {
+            "context_relevance": scores.get("context_relevance"),
+            "answer_faithfulness": scores.get("answer_faithfulness"),
+            "answer_relevance": scores.get("answer_relevance"),
+        },
     }

@@ -4,6 +4,8 @@ import sqlite3
 from pathlib import Path
 from threading import Lock
 
+from app.observability.rag_triad import aggregate_triad
+
 
 class MemoryTraceStore:
     """Process-local ring buffer so recent (including failed) traces stay listable."""
@@ -380,6 +382,7 @@ def conversation_metrics(traces: list[dict]) -> dict:
             "avg_retrieved_tokens": _avg(rag_retrieved),
             "context_cut_rate": round(rag_cuts / turns_with_retrieval, 3) if turns_with_retrieval else 0,
             "rag_tool_calls": rag_calls,
+            "triad": aggregate_triad(finished),
         },
         "sessions": session_rows[:50],
     }

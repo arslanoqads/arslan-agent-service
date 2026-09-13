@@ -9,6 +9,7 @@ from app.context.budget import assemble, current_context_budget
 from app.guardrails import INJECTION_REFUSAL, looks_like_injection
 from app.observability.cost import classify_error, estimate_usd
 from app.observability.model import close_span, new_span, new_trace, persisted_trace, public_trace, span_kind
+from app.observability.rag_triad import annotate_rag_triage
 from app.observability.store import get_store
 from app.rag.corpus import corpus_fingerprint
 from app.runtime.errors import public_error_message
@@ -384,6 +385,7 @@ async def stream_turn(message: str, thread_id: str):
                 store_answer(message, answer, fingerprint)
         append_turn(thread_id, message, answer)
         finish_trace(trace, status="ok", started=started)
+        annotate_rag_triage(trace, answer)
         save_trace(trace)
         yield {"type": "done", "response": answer, "trace": public_trace(trace), "trace_id": trace["id"]}
     except Exception as exc:
@@ -401,6 +403,7 @@ async def stream_turn(message: str, thread_id: str):
         trace["error_kind"] = error_kind
         trace["route"] = trace.get("route") or "portfolio"
         finish_trace(trace, status="error", started=started, error=detail)
+        annotate_rag_triage(trace, friendly)
         save_trace(trace)
         append_turn(thread_id, message, friendly)
         # Visitors get a calm reply; the private trace keeps the raw error.

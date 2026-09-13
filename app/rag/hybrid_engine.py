@@ -33,7 +33,7 @@ class HybridRAGEngine:
             [chunk["text"] for chunk in self.chunks],
             metadatas=[chunk["metadata"] for chunk in self.chunks],
         )
-        self._bm25.k = 3
+        self._bm25.k = 8
 
     def _load_or_embed(self) -> list[dict]:
         stored = self._read_index()
@@ -114,31 +114,61 @@ class HybridRAGEngine:
         return allowed
 
     def retrieve_chunks(self, query_text: str, *, job_match: bool = False) -> list[dict]:
+        """Two-step retrieval: BM25 narrows candidates, dense scoring picks the top ones."""
         allowed = self._allowed(query_text)
         if job_match:
             latest = latest_resume()
             allowed = {("resume", latest["version"])} if latest else set()
-        from langchain_openai import OpenAIEmbeddings
 
-        query_vector = OpenAIEmbeddings().embed_query(query_text)
-        dense = []
-        for chunk in self.chunks:
-            key = (chunk["metadata"]["doc_type"], chunk["metadata"]["version"])
-            if key not in allowed:
-                continue
-            dense.append(( _cosine(query_vector, chunk.get("embedding") or []), chunk))
-        dense.sort(key=lambda item: item[0], reverse=True)
-        ranked = []
-        for score, chunk in dense[:3]:
-            ranked.append({**chunk["metadata"], "text": chunk["text"], "score": score + 1})
+        # Step 1 — keyword / sparse retrieval to narrow the list (IDs, exact phrases).
+        candidates: list[dict] = []
+        seen: set[str] = set()
         for index, doc in enumerate(self._bm25.invoke(query_text)):
             meta = doc.metadata or {}
             key = (meta.get("doc_type"), meta.get("version"))
             if key not in allowed:
                 continue
-            ranked.append({**meta, "text": doc.page_content, "score": 1 - (index * 0.1)})
-        ordered = sandwich(ranked)
-        return ordered[:3]
+            text = doc.page_content or ""
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            candidates.append(
+                {
+                    **meta,
+                    "text": text,
+                    "bm25_rank": index,
+                    "score": 1 - (index * 0.05),
+                }
+            )
+            if len(candidates) >= 8:
+                break
+
+        # Fall back to all allowed chunks when BM25 finds nothing useful.
+        if not candidates:
+            for chunk in self.chunks:
+                key = (chunk["metadata"]["doc_type"], chunk["metadata"]["version"])
+                if key not in allowed:
+                    continue
+                candidates.append({**chunk["metadata"], "text": chunk["text"], "embedding": chunk.get("embedding")})
+
+        # Step 2 — dense re-rank of the narrowed list.
+        from langchain_openai import OpenAIEmbeddings
+
+        query_vector = OpenAIEmbeddings().embed_query(query_text)
+        ranked = []
+        for item in candidates:
+            embedding = item.get("embedding")
+            if embedding is None:
+                # Match BM25 hits back to indexed embeddings when present.
+                for chunk in self.chunks:
+                    if chunk["text"] == item.get("text"):
+                        embedding = chunk.get("embedding")
+                        break
+            dense = _cosine(query_vector, embedding or [])
+            bm25_boost = float(item.get("score") or 0) * 0.15
+            ranked.append({**{k: v for k, v in item.items() if k != "embedding"}, "score": dense + bm25_boost})
+        ranked.sort(key=lambda item: item.get("score", 0), reverse=True)
+        return sandwich(ranked)[:3]
 
     def retrieve(self, query_text: str):
         chunks = self.retrieve_chunks(query_text)

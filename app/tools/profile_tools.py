@@ -32,6 +32,19 @@ def query_arslan_profile(query: str) -> str:
 
 def rewrite_vague(query: str) -> str:
     words = (query or "").strip().lower()
-    if words in {"tell me about him", "who is he", "about you", "tell me more"}:
-        return "Arslan Qadri professional background experience skills biography"
+    rewrites = {
+        "tell me about him": "Arslan Qadri professional background experience skills biography",
+        "who is he": "Arslan Qadri professional background experience skills biography",
+        "about you": "Arslan Qadri professional background experience skills biography",
+        "tell me more": "Arslan Qadri professional background experience skills biography",
+        "his background": "Arslan Qadri professional background experience education",
+        "his experience": "Arslan Qadri work experience roles companies",
+        "his skills": "Arslan Qadri skills technologies tools",
+        "resume summary": "Arslan Qadri resume summary experience highlights",
+        "what has he built": "Arslan Qadri products projects shipped agents systems",
+    }
+    if words in rewrites:
+        return rewrites[words]
+    if len(words.split()) <= 3 and "arslan" not in words:
+        return f"Arslan Qadri {query}".strip()
     return query

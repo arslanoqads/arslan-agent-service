@@ -562,8 +562,59 @@ def test_conversation_metrics_sessions_and_tools():
     assert metrics["tools_per_session"]["3+"] == 1
     assert metrics["totals"]["tool_failures"] == 1
     assert metrics["rag"]["retrieval_turns"] == 1
+    assert metrics["rag"]["triad"]["samples"] == 1
+    assert "context_relevance" in metrics["rag"]["triad"]["scores"]
+    assert "answer_faithfulness" in metrics["rag"]["triad"]["scores"]
+    assert "answer_relevance" in metrics["rag"]["triad"]["scores"]
+    assert metrics["rag"]["triad"]["playbook"]
     assert metrics["ttft"]["samples"] == 2
     assert metrics["sessions"][0]["tokens"] == 43
+
+
+def test_rag_triad_proxy_scores_citations_and_abstain():
+    from app.observability.rag_triad import annotate_rag_triage, diagnose, score_turn
+
+    cited = score_turn(
+        {
+            "retrieval_ok": True,
+            "retrieved_tokens": 80,
+            "context_cut": False,
+            "has_citation": True,
+            "abstained": False,
+            "multi_hop": False,
+            "outcome": "success",
+            "stop_reason": None,
+        }
+    )
+    assert cited["context_relevance"] >= 0.9
+    assert cited["answer_faithfulness"] >= 0.4
+    assert cited["answer_relevance"] >= 0.7
+
+    abstain = score_turn(
+        {
+            "retrieval_ok": True,
+            "retrieved_tokens": 10,
+            "context_cut": False,
+            "has_citation": False,
+            "abstained": True,
+            "multi_hop": False,
+            "outcome": "success",
+            "stop_reason": None,
+        }
+    )
+    assert abstain["answer_faithfulness"] >= 0.5
+
+    trace = {
+        "tools": ["query_arslan_profile"],
+        "tool_status": [{"name": "query_arslan_profile", "status": "ok"}],
+        "context_budget": {"retrieved": 60, "cut": []},
+        "loop_count": 1,
+        "outcome": "success",
+    }
+    payload = annotate_rag_triage(trace, "From resume v3, page 2: shipped agents. I don't know his salary.")
+    assert payload["has_citation"] is True
+    assert payload["abstained"] is True
+    assert diagnose(cited)["code"] in {"D", "E"}
 
 
 def test_public_error_message_hides_openai_dump():

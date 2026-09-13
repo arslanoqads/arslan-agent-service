@@ -16,7 +16,7 @@
     <header class="top">
       <div class="brand">
         <p class="brand-mark">Observability</p>
-        <p class="brand-sub">Session health, tool mix, latency, RAG triage, costs, and golden-set classifications. PII redacted.</p>
+        <p class="brand-sub">Session health, tool mix, latency, RAG triad triage, costs, and golden-set classifications. PII redacted.</p>
       </div>
       <nav class="links">
         <a class="link" href="/">Chat</a>
@@ -37,8 +37,25 @@
       <div class="chart-card"><h3>Latency & TTFT (ms)</h3><canvas id="chart-latency"></canvas></div>
       <div class="chart-card"><h3>Loops & retries</h3><canvas id="chart-loops"></canvas></div>
       <div class="chart-card"><h3>Tokens (avg)</h3><canvas id="chart-tokens"></canvas></div>
-      <div class="chart-card"><h3>RAG triage</h3><canvas id="chart-rag"></canvas></div>
+      <div class="chart-card"><h3>RAG triad (proxy)</h3><canvas id="chart-rag"></canvas></div>
       <div class="chart-card"><h3>Cost per session (top)</h3><canvas id="chart-cost-session"></canvas></div>
+    </section>
+
+    <section class="rag-triage" id="rag-triage">
+      <h2 class="obs-title">RAG triage · evaluation triad</h2>
+      <p class="hint" id="rag-triage-note">Context relevance · answer faithfulness · answer relevance (LLM-judge or human). Dashboard uses production proxies until golden-set judges land.</p>
+      <div class="triad-grid" id="triad-scores"></div>
+      <div class="triad-meta">
+        <div>
+          <h3 class="obs-subtitle">Diagnosis</h3>
+          <p id="rag-diagnosis" class="hint">—</p>
+          <div class="pattern-list" id="rag-patterns"></div>
+        </div>
+        <div>
+          <h3 class="obs-subtitle">Fix playbook</h3>
+          <div class="playbook-list" id="rag-playbook"></div>
+        </div>
+      </div>
     </section>
 
     <section class="summary" id="summary"></section>
@@ -65,6 +82,11 @@
     const goldenSummaryEl = document.getElementById("golden-summary");
     const detailEl = document.getElementById("detail");
     const kpiEl = document.getElementById("kpi");
+    const triadScoresEl = document.getElementById("triad-scores");
+    const ragNoteEl = document.getElementById("rag-triage-note");
+    const ragDiagnosisEl = document.getElementById("rag-diagnosis");
+    const ragPatternsEl = document.getElementById("rag-patterns");
+    const ragPlaybookEl = document.getElementById("rag-playbook");
     const charts = {};
 
     const palette = ["#0f6e56", "#243447", "#8a6414", "#8c2828", "#4d6b5c", "#6b5a4d", "#2f5d8a"];
@@ -138,6 +160,7 @@
       const ttft = conv.ttft || {};
       const cost = conv.cost || {};
       const rag = conv.rag || {};
+      const triad = (rag.triad || {}).scores || {};
       const items = [
         ["Sessions", totals.sessions || 0],
         ["Turns", totals.turns || 0],
@@ -151,8 +174,10 @@
         ["In / out tokens", `${totals.input_tokens || 0} / ${totals.output_tokens || 0}`],
         ["Cost total", `$${cost.total || 0}`],
         ["Cost / session", `$${cost.avg_per_session || 0}`],
+        ["Context relevance", `${Math.round((triad.context_relevance || 0) * 100)}%`],
+        ["Faithfulness", `${Math.round((triad.answer_faithfulness || 0) * 100)}%`],
+        ["Answer relevance", `${Math.round((triad.answer_relevance || 0) * 100)}%`],
         ["RAG turn rate", `${Math.round((rag.retrieval_rate || 0) * 100)}%`],
-        ["RAG cut rate", `${Math.round((rag.context_cut_rate || 0) * 100)}%`],
       ];
       kpiEl.replaceChildren();
       items.forEach(([label, value]) => {
@@ -217,16 +242,18 @@
       );
 
       const rag = conv.rag || {};
+      const triadScores = (rag.triad || {}).scores || {};
       barChart(
         "chart-rag",
-        ["retrieval turns", "retrieval rate %", "avg retrieved toks", "cut rate %"],
+        ["context relevance %", "faithfulness %", "answer relevance %", "citation %", "abstain %"],
         [
-          rag.retrieval_turns || 0,
-          Math.round((rag.retrieval_rate || 0) * 100),
-          rag.avg_retrieved_tokens || 0,
-          Math.round((rag.context_cut_rate || 0) * 100),
+          Math.round((triadScores.context_relevance || 0) * 100),
+          Math.round((triadScores.answer_faithfulness || 0) * 100),
+          Math.round((triadScores.answer_relevance || 0) * 100),
+          Math.round(((rag.triad || {}).citation_rate || 0) * 100),
+          Math.round(((rag.triad || {}).abstain_rate || 0) * 100),
         ],
-        "rag"
+        "rag triad"
       );
 
       const sessions = (conv.sessions || []).slice(0, 8);
@@ -236,6 +263,64 @@
         sessions.map((s) => s.cost_usd || 0),
         "USD"
       );
+    }
+
+    function renderRagTriage(conv) {
+      const rag = conv.rag || {};
+      const triad = rag.triad || {};
+      const scores = triad.scores || {};
+      const bands = triad.bands || {};
+      const diagnosis = triad.diagnosis || {};
+      ragNoteEl.textContent = triad.note
+        || "Core evaluation triad: context relevance, answer faithfulness, answer relevance.";
+      triadScoresEl.replaceChildren();
+      [
+        ["Context relevance", scores.context_relevance, bands.context_relevance, "Query → retrieved docs"],
+        ["Answer faithfulness", scores.answer_faithfulness, bands.answer_faithfulness, "Context → answer"],
+        ["Answer relevance", scores.answer_relevance, bands.answer_relevance, "Query → answer"],
+      ].forEach(([label, score, band, edge]) => {
+        const card = document.createElement("div");
+        card.className = "triad-card";
+        card.innerHTML = `
+          <p class="kpi-label">${label}</p>
+          <p class="kpi-value">${Math.round((score || 0) * 100)}%</p>
+          <p class="triad-edge">${edge}</p>
+          <span class="badge badge-${band === "high" ? "ok" : band === "low" ? "fail" : "warn"}">${band || "—"}</span>
+        `;
+        triadScoresEl.appendChild(card);
+      });
+
+      ragDiagnosisEl.textContent = diagnosis.code
+        ? `Pattern ${diagnosis.code}: ${diagnosis.label || "—"} · ${triad.samples || 0} retrieval samples · cut rate ${Math.round((rag.context_cut_rate || 0) * 100)}% · multi-hop ${Math.round((triad.multi_hop_rate || 0) * 100)}%`
+        : "No retrieval turns yet.";
+
+      ragPatternsEl.replaceChildren();
+      Object.entries(triad.patterns || {}).forEach(([code, pattern]) => {
+        const row = document.createElement("div");
+        row.className = `pattern-row${diagnosis.code === code ? " active" : ""}`;
+        row.textContent = `${code} · ${pattern.label} (ctx ${pattern.context_relevance}, faith ${pattern.answer_faithfulness}, ans ${pattern.answer_relevance})`;
+        ragPatternsEl.appendChild(row);
+      });
+
+      ragPlaybookEl.replaceChildren();
+      (triad.playbook || []).forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "playbook-row";
+        const head = document.createElement("div");
+        head.className = "row-head";
+        head.append(
+          badge(item.status || "planned", item.status === "active" ? "ok" : item.status === "partial" ? "warn" : "neutral"),
+          badge((item.dimension || "").replaceAll("_", " "), "neutral")
+        );
+        const body = document.createElement("div");
+        body.className = "row-body";
+        body.textContent = item.fix || "";
+        const notes = document.createElement("div");
+        notes.className = "row-notes";
+        notes.textContent = item.detail || "";
+        row.append(head, body, notes);
+        ragPlaybookEl.appendChild(row);
+      });
     }
 
     function renderTraceRow(trace) {
@@ -309,6 +394,7 @@
 
       renderKpis(conv);
       renderCharts(conv);
+      renderRagTriage(conv);
 
       const summary = data.summary || {};
       summaryEl.textContent = `Failure rate ${Math.round((summary.failure_rate || 0) * 100)}% · avg turn ${summary.avg_duration_ms || 0} ms · avg tokens ${summary.avg_tokens || 0} · cost/request $${summary.cost_per_request || 0} · cost/success $${summary.cost_per_success || 0}`;

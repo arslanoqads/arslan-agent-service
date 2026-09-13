@@ -9,10 +9,21 @@
   const budgetBar = document.getElementById("budget-bar");
   const budgetLegend = document.getElementById("budget-legend");
   const toolStatus = document.getElementById("tool-status");
+  const sessionIds = document.getElementById("session-ids");
 
   const threadId =
     crypto.randomUUID?.() ||
     `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  let lastTraceId = "";
+
+  function renderSessionIds(traceId) {
+    if (!sessionIds) return;
+    const tracePart = traceId ? ` · trace ${traceId}` : "";
+    sessionIds.textContent = `session ${threadId}${tracePart}`;
+  }
+
+  renderSessionIds("");
 
   function addMessage(role, text) {
     const el = document.createElement("div");
@@ -58,6 +69,10 @@
 
   function renderTrace(trace) {
     if (!trace || !traceSteps) return;
+    if (trace.id) {
+      lastTraceId = trace.id;
+      renderSessionIds(trace.id);
+    }
     const tokens = (trace.input_tokens || 0) + (trace.output_tokens || 0);
     const late = trace.spans?.some((span) => span.kind === "llm" && span.ttft_ms != null && span.ttft_ms > 8000);
     const cache = cacheLabel(trace.cache);
@@ -147,10 +162,13 @@
           if (event.type === "done") {
             loading.className = "msg assistant";
             loading.textContent = event.response || loading.textContent || "(empty response)";
+            if (event.trace_id) renderSessionIds(event.trace_id);
+            if (event.trace) renderTrace(event.trace);
             finished = true;
           } else if (event.type === "error") {
             loading.className = "msg error";
             loading.textContent = event.detail || "Something went wrong. Please try again.";
+            if (event.trace_id) renderSessionIds(event.trace_id);
             finished = true;
           }
         }

@@ -97,5 +97,68 @@
     "severity": "major",
     "source": "synthetic",
     "notes": "Bare yes with no history still avoids the greeting short-circuit; portfolio may ask what to confirm."
+  },
+  {
+    "id": "prod-email-and-book-same-turn",
+    "family": "POS",
+    "input": "can you send me your resume at arslanoqads@gmail.com and book a call with me tomorrow at 3?",
+    "expected_tool": "send_resume_email",
+    "must_not_include": ["temporary processing error"],
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "production",
+    "notes": "Production multi-tool ask. May clarify timezone once; must not crash. Pair with prod-timezone-followup-dual-tools."
+  },
+  {
+    "id": "prod-timezone-followup-dual-tools",
+    "family": "NEAR",
+    "input": "3pm ET 15 mins",
+    "prior_turns": [
+      {
+        "role": "user",
+        "content": "can you send me your resume at arslanoqads@gmail.com and book a call with me tomorrow at 3?"
+      },
+      {
+        "role": "assistant",
+        "content": "Please provide the time zone for the call at 3, so I can schedule it accurately."
+      }
+    ],
+    "expected_tool": "schedule_intro_call",
+    "expected_route": "portfolio_agent",
+    "must_not_include": ["temporary processing error", "How can I assist you today"],
+    "oracle": "code",
+    "severity": "blocker",
+    "source": "production",
+    "notes": "Regression: parallel send_resume_email + schedule_intro_call used to drop the second ToolMessage and 400 the model. Trace store was empty at capture time; label by session/trace ids from Debug once redeployed."
+  },
+  {
+    "id": "prod-which-tool-failed-followup",
+    "family": "NEAR",
+    "input": "did the email fail or calendar fail?",
+    "prior_turns": [
+      {
+        "role": "user",
+        "content": "can you send me your resume at arslanoqads@gmail.com and book a call with me tomorrow at 3?"
+      },
+      {
+        "role": "assistant",
+        "content": "Please provide the time zone for the call at 3, so I can schedule it accurately."
+      },
+      {
+        "role": "user",
+        "content": "3pm ET 15 mins"
+      },
+      {
+        "role": "assistant",
+        "content": "I hit a temporary processing error on that turn. Please ask again in a new message."
+      }
+    ],
+    "expected_tool": "none",
+    "expected_route": "portfolio_agent",
+    "must_not_include": ["temporary processing error"],
+    "oracle": "code",
+    "severity": "major",
+    "source": "production",
+    "notes": "After a dual-tool crash, explain status from history without throwing another message-shape error."
   }
 ]
